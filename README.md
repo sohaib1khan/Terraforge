@@ -7,6 +7,7 @@ The stack is Docker Compose first: API and worker (Go), Postgres, Redis, a Terra
 ## What you get
 
 - Namespaces with file tree inspect/edit, config map, and remote state view
+- Providers browser and Documentation (registry modules + every published example)
 - Runs from the UI with live console output, history, cancel, and optional approval gates
 - Secure local connect: one-time install codes (`curl | sh` or companion CLI), scoped tokens — not browser JWTs
 - Sync between a local project and the namespace (`terraforge sync` / `pull` / `watch`)

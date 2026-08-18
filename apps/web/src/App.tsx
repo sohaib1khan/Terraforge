@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth/AuthContext'
 import { AuditLog } from './pages/AuditLog'
 import { Dashboard } from './pages/Dashboard'
+import { Documentation } from './pages/Documentation'
 import { FirstRunSetup } from './pages/FirstRunSetup'
 import { Login } from './pages/Login'
 import { NamespaceView } from './pages/NamespaceView'
@@ -46,6 +47,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Providers />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/docs"
+        element={
+          <RequireAuth>
+            <Documentation />
           </RequireAuth>
         }
       />

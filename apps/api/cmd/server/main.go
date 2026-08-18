@@ -22,6 +22,7 @@ import (
 	"github.com/terraforge/terraforge/apps/api/internal/db"
 	"github.com/terraforge/terraforge/apps/api/internal/drift"
 	"github.com/terraforge/terraforge/apps/api/internal/members"
+	"github.com/terraforge/terraforge/apps/api/internal/modules"
 	"github.com/terraforge/terraforge/apps/api/internal/namespaces"
 	"github.com/terraforge/terraforge/apps/api/internal/providers"
 	"github.com/terraforge/terraforge/apps/api/internal/queue"
@@ -94,6 +95,7 @@ func main() {
 	webhooksHandler := webhooks.NewHandler(webhooksSvc, runsSvc, auditSvc, gate)
 	auditHandler := audit.NewHandler(auditSvc)
 	providersHandler := providers.NewHandler(providers.NewService())
+	modulesHandler := modules.NewHandler(modules.NewService())
 	graphHandler := tfgraph.NewHandler(nsSvc, tfstateSvc, gate)
 
 	go drift.NewScheduler(nsSvc, runsSvc, auditSvc).Start(ctx)
@@ -124,6 +126,7 @@ func main() {
 	webhooksHandler.Register(mux, authHandler.Middleware)
 	auditHandler.Register(mux, authHandler.Middleware)
 	providersHandler.Register(mux, authHandler.Middleware)
+	modulesHandler.Register(mux, authHandler.Middleware)
 	graphHandler.Register(mux, authHandler.Middleware)
 	tfstateHandler.Register(mux)
 	tfstateHandler.RegisterUI(mux, authHandler.Middleware, gate)

@@ -60,6 +60,9 @@ export function AppShell({
           <NavLink to="/providers" className={linkClass}>
             Providers
           </NavLink>
+          <NavLink to="/docs" className={linkClass}>
+            Documentation
+          </NavLink>
           {user?.is_admin && (
             <>
               <NavLink to="/audit" className={linkClass}>

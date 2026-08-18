@@ -204,6 +204,50 @@ export type ProviderDetail = {
   docs_url: string
 }
 
+export type ModuleSummary = {
+  id: string
+  namespace: string
+  name: string
+  provider: string
+  full_name: string
+  description: string
+  source: string
+  downloads: number
+  version?: string
+  verified: boolean
+  logo_url?: string
+}
+
+export type ModuleInput = {
+  name: string
+  type: string
+  description: string
+  default?: string
+  required: boolean
+}
+
+export type ModuleExample = {
+  name: string
+  path: string
+  readme?: string
+  source_line: string
+  snippet: string
+  inputs?: ModuleInput[]
+  outputs?: { name: string; description: string }[]
+  resource_count: number
+}
+
+export type ModuleDetail = {
+  module: ModuleSummary
+  snippet: string
+  docs_url: string
+  readme?: string
+  inputs?: ModuleInput[]
+  outputs?: { name: string; description: string }[]
+  examples: ModuleExample[]
+  example_count: number
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -409,6 +453,15 @@ export const api = {
   getProvider: (namespace: string, name: string) =>
     request<ProviderDetail>(
       `/api/providers/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    ),
+
+  searchModules: (q = '', limit = 25, offset = 0) =>
+    request<{ modules: ModuleSummary[]; total: number }>(
+      `/api/modules?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`,
+    ),
+  getModule: (namespace: string, name: string, provider: string) =>
+    request<ModuleDetail>(
+      `/api/modules/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/${encodeURIComponent(provider)}`,
     ),
 
   listBackendTokens: (id: string) =>
