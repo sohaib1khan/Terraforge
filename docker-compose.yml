@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-terraforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-terraforge}
+      POSTGRES_DB: ${POSTGRES_DB:-terraforge}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-terraforge} -d ${POSTGRES_DB:-terraforge}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  runner:
+    build:
+      context: ./runner-image
+    image: ${RUNNER_IMAGE:-terraforge-runner:local}
+    entrypoint: ["true"]
+    restart: "no"
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-terraforge}:${POSTGRES_PASSWORD:-terraforge}@postgres:5432/${POSTGRES_DB:-terraforge}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      API_ADDR: ":8080"
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-terraforge-local}
+      JWT_TTL: ${JWT_TTL:-24h}
+      DATA_DIR: /data
+      MIGRATIONS_DIR: /app/migrations
+      RUNNER_IMAGE: ${RUNNER_IMAGE:-terraforge-runner:local}
+      RUN_TIMEOUT_SECONDS: ${RUN_TIMEOUT_SECONDS:-600}
+      APP_PORT: ${APP_PORT:-3000}
+    ports:
+      - "${API_PORT:-8088}:8080"
+    volumes:
+      - terraforge_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.worker
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-terraforge}:${POSTGRES_PASSWORD:-terraforge}@postgres:5432/${POSTGRES_DB:-terraforge}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-terraforge-local}
+      DATA_DIR: /data
+      RUNNER_IMAGE: ${RUNNER_IMAGE:-terraforge-runner:local}
+      RUN_TIMEOUT_SECONDS: ${RUN_TIMEOUT_SECONDS:-600}
+    volumes:
+      - terraforge_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      runner:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    ports:
+      # Primary app URL: http://localhost:${APP_PORT}
+      - "${APP_PORT:-3000}:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  terraforge_data:

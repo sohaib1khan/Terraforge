@@ -1,0 +1,8 @@
+# Dev overrides — use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Keeps API/web bind-mount friendly ports; prefer plain `docker compose up` for the full stack.
+
+services:
+  api:
+    volumes:
+      - terraforge_data:/data
+      - ./apps/api/migrations:/app/migrations:ro

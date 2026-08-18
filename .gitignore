@@ -1,0 +1,50 @@
+# Dependencies & build
+node_modules/
+dist/
+apps/web/dist/
+apps/web/node_modules/
+*.exe
+*.test
+*.out
+bin/
+apps/cli/terraforge
+
+# Local env & secrets (never commit)
+.env
+.env.local
+.env.*.local
+apps/api/.env
+apps/web/.env
+!.env.example
+
+# Runtime data (namespaces, logs, state) — volume-backed in compose
+apps/api/data/
+data/
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraforge/
+terraforge_connect/
+
+# Local design / planning (kept off GitHub)
+Blueprint.md
+blueprint.md
+docs/blueprint.md
+docs/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor/
+
+# Logs & temp
+*.log
+tmp/
+.tmp/
+coverage/
+*.tsbuildinfo
+apps/web/node_modules/.tmp/
