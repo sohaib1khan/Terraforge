@@ -18,11 +18,14 @@ function GitHubMark({ className }: { className?: string }) {
 type Props = {
   /** icon = mark only; labeled = mark + “Source on GitHub” */
   variant?: 'icon' | 'labeled'
+  /** onDark = readable on galaxy sidebar */
+  tone?: 'default' | 'onDark'
   className?: string
 }
 
-export function GitHubLink({ variant = 'labeled', className = '' }: Props) {
+export function GitHubLink({ variant = 'labeled', tone = 'default', className = '' }: Props) {
   const labeled = variant === 'labeled'
+  const onDark = tone === 'onDark'
   return (
     <a
       href={GITHUB_REPO_URL}
@@ -30,8 +33,16 @@ export function GitHubLink({ variant = 'labeled', className = '' }: Props) {
       rel="noopener noreferrer"
       className={
         labeled
-          ? `inline-flex items-center gap-2 text-base font-bold text-ink-muted transition-colors hover:text-ember-deep ${className}`
-          : `inline-flex items-center justify-center rounded-md p-1.5 text-ink-muted transition-colors hover:bg-panel hover:text-ember-deep ${className}`
+          ? `inline-flex items-center gap-2 text-base font-bold transition-colors ${
+              onDark
+                ? 'text-[#c4b6e0] hover:text-[#b8f0d4]'
+                : 'text-ink-muted hover:text-ember-deep'
+            } ${className}`
+          : `inline-flex items-center justify-center rounded-md p-1.5 transition-colors ${
+              onDark
+                ? 'text-[#c4b6e0] hover:bg-white/10 hover:text-[#b8f0d4]'
+                : 'text-ink-muted hover:bg-panel hover:text-ember-deep'
+            } ${className}`
       }
       aria-label="Terraforge on GitHub"
       title="Source on GitHub"

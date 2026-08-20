@@ -37,11 +37,12 @@ type Edge struct {
 }
 
 type Graph struct {
-	Nodes   []Node `json:"nodes"`
-	Edges   []Edge `json:"edges"`
-	Files   int    `json:"files_scanned"`
-	Note    string `json:"note,omitempty"`
-	HasState bool  `json:"has_state"`
+	Nodes        []Node       `json:"nodes"`
+	Edges        []Edge       `json:"edges"`
+	Files        int          `json:"files_scanned"`
+	Note         string       `json:"note,omitempty"`
+	HasState     bool         `json:"has_state"`
+	Environment  Environment  `json:"environment"`
 }
 
 var (
@@ -143,6 +144,9 @@ func Build(root string, stateAddrs map[string]bool) (Graph, error) {
 		return g.Nodes[i].ID < g.Nodes[j].ID
 	})
 	dedupeEdges(&g)
+	env := DetectEnvironment(root)
+	EnrichEnvironmentFromGraph(&env, g)
+	g.Environment = env
 	return g, nil
 }
 

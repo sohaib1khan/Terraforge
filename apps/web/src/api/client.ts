@@ -53,12 +53,58 @@ export type GraphNode = {
   provider?: string
 }
 
+export type ConfigEnvironment = {
+  summary: string
+  primary?: string
+  providers: Array<{
+    name: string
+    label: string
+    source?: string
+    version?: string
+    category: string
+    declared: boolean
+    in_config: boolean
+    in_state: boolean
+    resource_count: number
+    data_count: number
+  }>
+  clouds: string[]
+  has_local: boolean
+  empty: boolean
+  note?: string
+}
+
 export type ConfigGraph = {
   nodes: GraphNode[]
   edges: Array<{ from: string; to: string; kind: string }>
   files_scanned: number
   note?: string
   has_state: boolean
+  environment?: ConfigEnvironment
+}
+
+export type VersionSuggestion = {
+  kind: 'provider' | 'module'
+  name: string
+  label: string
+  source: string
+  current?: string
+  latest?: string
+  update_available: boolean
+  newer_outside_constraint: boolean
+  constraint_satisfied: boolean
+  message: string
+  docs_url?: string
+  file?: string
+}
+
+export type Suggestions = {
+  providers: VersionSuggestion[]
+  modules: VersionSuggestion[]
+  update_count: number
+  bump_count: number
+  checked_at: string
+  note?: string
 }
 
 export type NamespaceSecret = {
@@ -455,7 +501,7 @@ export const api = {
       `/api/providers/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
     ),
 
-  searchModules: (q = '', limit = 25, offset = 0) =>
+  searchModules: (q = '', limit = 50, offset = 0) =>
     request<{ modules: ModuleSummary[]; total: number }>(
       `/api/modules?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`,
     ),
@@ -530,6 +576,8 @@ export const api = {
 
   getState: (id: string) => request<StateView>(`/api/namespaces/${id}/state`),
   getGraph: (id: string) => request<ConfigGraph>(`/api/namespaces/${id}/graph`),
+  getSuggestions: (id: string) =>
+    request<Suggestions>(`/api/namespaces/${id}/suggestions`),
 }
 
 export function runLogsWsUrl(namespaceId: string, runId: string): string {

@@ -38,10 +38,8 @@ export function FirstRunSetup() {
   return (
     <div className="flex min-h-dvh items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
-        <p className="font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl">
-          Terraforge
-        </p>
-        <p className="mt-3 text-lg text-ink-muted">
+        <p className="sidebar-brand-title text-4xl sm:text-5xl">Terraforge</p>
+        <p className="mt-3 text-lg text-[#c4b6e0]">
           Create the first admin account to unlock the control plane.
         </p>
 
@@ -80,15 +78,15 @@ export function FirstRunSetup() {
           </button>
         </form>
 
-        <p className="mt-6 text-base text-ink-muted">
+        <p className="mt-6 text-base text-[#c4b6e0]">
           Already set up?{' '}
-          <Link className="font-bold text-ember-deep" to="/login">
+          <Link className="font-bold text-[#b8f0d4]" to="/login">
             Sign in
           </Link>
         </p>
 
         <div className="mt-8 flex justify-center">
-          <GitHubLink />
+          <GitHubLink tone="onDark" />
         </div>
       </div>
     </div>

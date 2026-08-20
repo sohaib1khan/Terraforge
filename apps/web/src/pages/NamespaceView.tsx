@@ -13,11 +13,14 @@ import {
   type RunType,
   type StateView,
   type ConfigGraph,
+  type Suggestions,
 } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import { ConnectLocalGuide } from '../components/ConnectLocalGuide'
 import { ConfigMap } from '../components/ConfigMap/ConfigMap'
 import { ConfigSyncPanel } from '../components/ConfigSync/ConfigSyncPanel'
+import { EnvironmentPanel, EnvBadgeRow } from '../components/EnvironmentPanel/EnvironmentPanel'
+import { SuggestionsPanel } from '../components/SuggestionsPanel/SuggestionsPanel'
 import { StateMap } from '../components/StateMap/StateMap'
 import { writeLocalFile } from '../lib/localFolder'
 import { CodeEditor } from '../components/Editor/Editor'
@@ -65,12 +68,25 @@ export function NamespaceView() {
   const [guideOpen, setGuideOpen] = useState(false)
   const [graph, setGraph] = useState<ConfigGraph | null>(null)
   const [graphBusy, setGraphBusy] = useState(false)
+  const [suggestions, setSuggestions] = useState<Suggestions | null>(null)
+  const [suggestionsBusy, setSuggestionsBusy] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
   const [syncKey, setSyncKey] = useState(0)
 
   const dirty = content !== savedContent
   const activeRun = runs.find((r) => r.id === activeRunId) ?? null
   const liveRun = runs.some((r) => r.status === 'queued' || r.status === 'running')
+
+  const refreshSuggestions = useCallback(async () => {
+    setSuggestionsBusy(true)
+    try {
+      setSuggestions(await api.getSuggestions(id))
+    } catch {
+      // registry may be unreachable — keep prior suggestions
+    } finally {
+      setSuggestionsBusy(false)
+    }
+  }, [id])
 
   const refreshMeta = useCallback(async () => {
     const [namespace, files, runList, tokenList, cliTokenList, memberList, webhook, secretList, state, graphData] =
@@ -106,7 +122,8 @@ export function NamespaceView() {
     refreshMeta().catch((err) => {
       setError(err instanceof ApiError ? err.message : 'Failed to load namespace')
     })
-  }, [refreshMeta])
+    void refreshSuggestions()
+  }, [refreshMeta, refreshSuggestions])
 
   // Auto-open first Terraform file for inspect when nothing selected.
   useEffect(() => {
@@ -180,6 +197,8 @@ export function NamespaceView() {
         /* local link optional */
       }
       setSyncKey((k) => k + 1)
+      void refreshGraph()
+      void refreshSuggestions()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Save failed')
     } finally {
@@ -431,6 +450,7 @@ export function NamespaceView() {
     setGraphBusy(true)
     try {
       setGraph(await api.getGraph(id))
+      void refreshSuggestions()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to build config map')
     } finally {
@@ -485,11 +505,24 @@ export function NamespaceView() {
           </div>
         </div>
         {ns && (
-          <p className="mt-1 text-xs text-ink-muted">
-            {ns.slug} · terraform {ns.terraform_version} · {ns.default_branch}
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <p className="text-xs text-ink-muted">
+              {ns.slug} · terraform {ns.terraform_version} · {ns.default_branch}
+            </p>
+            {graph?.environment && !graph.environment.empty && (
+              <EnvBadgeRow environment={graph.environment} size="sm" />
+            )}
+          </div>
         )}
       </header>
+
+      <EnvironmentPanel environment={graph?.environment} loading={graphBusy} />
+
+      <SuggestionsPanel
+        suggestions={suggestions}
+        loading={suggestionsBusy}
+        onRefresh={() => void refreshSuggestions()}
+      />
 
       {error && <p className="mb-4 text-sm text-danger">{error}</p>}
 

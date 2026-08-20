@@ -38,10 +38,8 @@ export function Login() {
   return (
     <div className="flex min-h-dvh items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
-        <p className="font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl">
-          Terraforge
-        </p>
-        <p className="mt-3 text-lg text-ink-muted">
+        <p className="sidebar-brand-title text-4xl sm:text-5xl">Terraforge</p>
+        <p className="mt-3 text-lg text-[#c4b6e0]">
           Sign in to manage namespaces and Terraform runs.
         </p>
 
@@ -79,7 +77,7 @@ export function Login() {
         </form>
 
         <div className="mt-8 flex justify-center">
-          <GitHubLink />
+          <GitHubLink tone="onDark" />
         </div>
       </div>
     </div>

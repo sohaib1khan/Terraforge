@@ -8,6 +8,7 @@ import { Login } from './pages/Login'
 import { NamespaceView } from './pages/NamespaceView'
 import { Providers } from './pages/Providers'
 import { Settings } from './pages/Settings'
+import { Templates } from './pages/Templates'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading, needsSetup } = useAuth()
@@ -39,6 +40,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Dashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/templates"
+        element={
+          <RequireAuth>
+            <Templates />
           </RequireAuth>
         }
       />

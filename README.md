@@ -7,6 +7,10 @@ The stack is Docker Compose first: API and worker (Go), Postgres, Redis, a Terra
 ## What you get
 
 - Namespaces with file tree inspect/edit, config map, and remote state view
+- Environment detection (AWS, Azure, Google Cloud, Local, …) from config + state
+- Hawk-eye dashboard: fleet health, active runs, drift, approvals, registry bumps
+- Beginner Terraform templates (local, AWS, Azure, GCP) ready to load into a namespace
+- Registry suggestions: compare declared provider/module versions to public latest
 - Providers browser and Documentation (registry modules + every published example)
 - Runs from the UI with live console output, history, cancel, and optional approval gates
 - Secure local connect: one-time install codes (`curl | sh` or companion CLI), scoped tokens — not browser JWTs

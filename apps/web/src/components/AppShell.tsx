@@ -35,27 +35,17 @@ export function AppShell({
       </a>
 
       <aside className="app-sidebar" aria-label="Primary">
-        <div className="flex items-start justify-between gap-3 px-4 py-4 lg:block">
-          <div>
-            <p className="font-display text-2xl font-bold tracking-tight text-ink">Terraforge</p>
-            <p className="mt-1 text-base text-ink-muted">Control plane</p>
-          </div>
-          <div className="shrink-0 text-right lg:mt-5 lg:text-left">
-            <p className="max-w-[12rem] truncate text-base text-ink-muted" title={user?.email}>
-              {user?.email}
-            </p>
-            <button type="button" onClick={logout} className="btn-secondary btn-compact mt-2 px-3 text-base">
-              Sign out
-            </button>
-          </div>
+        <div className="sidebar-brand">
+          <p className="sidebar-brand-title">Terraforge</p>
+          <p className="sidebar-brand-sub">Control plane</p>
         </div>
 
-        <nav
-          className="flex gap-1 overflow-x-auto px-2 pb-3 lg:flex-1 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-2 lg:pb-6"
-          aria-label="App"
-        >
+        <nav className="sidebar-nav" aria-label="App">
           <NavLink to="/" end className={linkClass}>
-            Namespaces
+            Dashboard
+          </NavLink>
+          <NavLink to="/templates" className={linkClass}>
+            Templates
           </NavLink>
           <NavLink to="/providers" className={linkClass}>
             Providers
@@ -75,17 +65,25 @@ export function AppShell({
           )}
         </nav>
 
-        <div className="mt-auto hidden border-t-2 border-line/50 px-3 py-4 lg:block">
-          <button
-            type="button"
-            onClick={() => setGuideOpen(true)}
-            className="w-full text-left text-base font-bold text-ember-deep hover:underline"
-          >
+        <div className="sidebar-foot">
+          <button type="button" onClick={() => setGuideOpen(true)} className="sidebar-foot-btn">
             Connect local Terraform
           </button>
-          <p className="mt-1 text-sm text-ink-muted">HTTP backend or companion CLI</p>
+          <p className="sidebar-foot-hint">HTTP backend or companion CLI</p>
           <div className="mt-4">
-            <GitHubLink />
+            <GitHubLink tone="onDark" />
+          </div>
+          <div className="mt-5 border-t border-white/10 pt-4">
+            <p className="sidebar-user-email" title={user?.email}>
+              {user?.email}
+            </p>
+            <button
+              type="button"
+              onClick={logout}
+              className="btn-sidebar btn-compact mt-2 w-full px-3 text-base"
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </aside>
@@ -103,19 +101,31 @@ export function AppShell({
                   )}
                   {subtitle && <p className="mt-2 text-lg text-ink-muted">{subtitle}</p>}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setGuideOpen(true)}
-                  className="btn-secondary btn-compact shrink-0 px-3 text-base lg:hidden"
-                >
-                  Connect local TF
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGuideOpen(true)}
+                    className="btn-secondary btn-compact shrink-0 px-3 text-base lg:hidden"
+                  >
+                    Connect local TF
+                  </button>
+                </div>
               </div>
             </header>
           )}
           {children}
         </div>
       </main>
+
+      {/* Mobile: account strip when page has no AppShell title header */}
+      <div className="sidebar-mobile-account lg:hidden">
+        <p className="truncate text-sm text-[#c4b6e0]" title={user?.email}>
+          {user?.email}
+        </p>
+        <button type="button" onClick={logout} className="btn-sidebar btn-compact px-3 text-sm">
+          Sign out
+        </button>
+      </div>
 
       <ConnectLocalGuide
         open={guideOpen}

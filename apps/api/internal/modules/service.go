@@ -79,35 +79,16 @@ func NewService() *Service {
 }
 
 func (s *Service) Search(ctx context.Context, q string, limit, offset int) ([]Module, int, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 25
+	if limit <= 0 || limit > 100 {
+		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
 	}
 	q = strings.TrimSpace(q)
 
-	if q == "" {
-		items, err := s.popular(ctx, limit+offset)
-		if err != nil {
-			return nil, 0, err
-		}
-		if offset >= len(items) {
-			return []Module{}, len(items), nil
-		}
-		end := offset + limit
-		if end > len(items) {
-			end = len(items)
-		}
-		return items[offset:end], len(items), nil
-	}
+	ns, name, provider := parseSearch(q)
 
-	var ranked []Module
-	if direct, ok := s.lookupDirect(ctx, q); ok {
-		ranked = append(ranked, direct)
-	}
-
-	ns, name, provider := splitQuery(q)
 	params := url.Values{}
 	params.Set("page[size]", strconv.Itoa(limit))
 	params.Set("page[number]", strconv.Itoa(offset/limit+1))
@@ -121,6 +102,14 @@ func (s *Service) Search(ctx context.Context, q string, limit, offset int) ([]Mo
 	}
 	if provider != "" {
 		params.Set("filter[provider]", provider)
+	}
+
+	var ranked []Module
+	// Direct lookup only when the query looks like a concrete module id.
+	if q != "" && (strings.Contains(q, "/") || (name != "" && provider != "" && ns != "")) {
+		if direct, ok := s.lookupDirect(ctx, q); ok {
+			ranked = append(ranked, direct)
+		}
 	}
 
 	body, err := s.getJSON(ctx, "/v2/modules?"+params.Encode())
@@ -138,7 +127,9 @@ func (s *Service) Search(ctx context.Context, q string, limit, offset int) ([]Mo
 		return nil, 0, err
 	}
 
-	if len(items) == 0 || (ns == "" && name != "" && !exactNameMatch(items, name)) {
+	// Soft fallback: free-text name search against a local popular catalog.
+	// Skip when filtering by provider alone — registry already returns the full set.
+	if q != "" && provider == "" && (len(items) == 0 || (ns == "" && name != "" && !exactNameMatch(items, name))) {
 		catalog, cerr := s.catalog(ctx)
 		if cerr == nil {
 			filtered := filterCatalog(catalog, q)
@@ -211,23 +202,6 @@ func (s *Service) fetchV1Summary(ctx context.Context, namespace, name, provider 
 		return Module{}, err
 	}
 	return d.Module, nil
-}
-
-func (s *Service) popular(ctx context.Context, n int) ([]Module, error) {
-	if n < 50 {
-		n = 50
-	}
-	params := url.Values{}
-	params.Set("page[size]", strconv.Itoa(min(n, 100)))
-	params.Set("page[number]", "1")
-	params.Set("sort", "-downloads")
-	params.Set("include", "latest-version")
-	body, err := s.getJSON(ctx, "/v2/modules?"+params.Encode())
-	if err != nil {
-		return nil, err
-	}
-	items, _, err := parseV2List(body)
-	return items, err
 }
 
 func (s *Service) catalog(ctx context.Context) ([]Module, error) {
@@ -586,6 +560,73 @@ func splitQuery(q string) (ns, name, provider string) {
 	default:
 		return parts[0], parts[1], parts[2]
 	}
+}
+
+// parseSearch maps UI queries onto registry filters.
+// "aws" → provider=aws (not name=aws); "vpc" → name=vpc; "ns/name/prov" → full id.
+func parseSearch(q string) (ns, name, provider string) {
+	q = strings.TrimSpace(strings.ToLower(q))
+	if q == "" {
+		return "", "", ""
+	}
+	if strings.Contains(q, "/") {
+		return splitQuery(q)
+	}
+	fields := strings.Fields(q)
+	if len(fields) == 1 {
+		if p, ok := knownProvider(fields[0]); ok {
+			return "", "", p
+		}
+		return "", fields[0], ""
+	}
+	// "aws vpc" / "vpc aws" → provider + module name
+	if p, ok := knownProvider(fields[0]); ok {
+		return "", fields[1], p
+	}
+	if p, ok := knownProvider(fields[len(fields)-1]); ok {
+		return "", fields[0], p
+	}
+	return "", fields[0], ""
+}
+
+func knownProvider(token string) (string, bool) {
+	aliases := map[string]string{
+		"aws":            "aws",
+		"amazon":         "aws",
+		"azurerm":        "azurerm",
+		"azure":          "azurerm",
+		"google":         "google",
+		"gcp":            "google",
+		"google-beta":    "google-beta",
+		"kubernetes":     "kubernetes",
+		"k8s":            "kubernetes",
+		"helm":           "helm",
+		"azapi":          "azapi",
+		"oci":            "oci",
+		"openstack":      "openstack",
+		"vsphere":        "vsphere",
+		"digitalocean":   "digitalocean",
+		"do":             "digitalocean",
+		"linode":         "linode",
+		"cloudflare":     "cloudflare",
+		"datadog":        "datadog",
+		"github":         "github",
+		"gitlab":         "gitlab",
+		"random":         "random",
+		"null":           "null",
+		"local":          "local",
+		"tls":            "tls",
+		"docker":         "docker",
+		"vault":          "vault",
+		"consul":         "consul",
+		"nomad":          "nomad",
+		"alicloud":       "alicloud",
+		"ibm":            "ibm",
+		"tencentcloud":   "tencentcloud",
+		"huaweicloud":    "huaweicloud",
+	}
+	p, ok := aliases[strings.ToLower(strings.TrimSpace(token))]
+	return p, ok
 }
 
 func filterCatalog(catalog []Module, q string) []Module {

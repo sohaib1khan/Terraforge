@@ -8,10 +8,28 @@ import {
 } from '../api/client'
 import { AppShell } from '../components/AppShell'
 
+const PAGE_SIZE = 50
+
+const PROVIDER_CHIPS = [
+  { label: 'All', q: '' },
+  { label: 'AWS', q: 'aws' },
+  { label: 'Azure', q: 'azurerm' },
+  { label: 'Google', q: 'google' },
+  { label: 'Kubernetes', q: 'kubernetes' },
+  { label: 'Helm', q: 'helm' },
+  { label: 'DigitalOcean', q: 'digitalocean' },
+  { label: 'Cloudflare', q: 'cloudflare' },
+] as const
+
 function formatDownloads(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+function formatTotal(n: number): string {
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`
   return String(n)
 }
 
@@ -81,8 +99,10 @@ export function Documentation() {
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
   const [items, setItems] = useState<ModuleSummary[]>([])
+  const [total, setTotal] = useState(0)
   const [selected, setSelected] = useState<ModuleDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -97,12 +117,15 @@ export function Documentation() {
       setLoading(true)
       setError('')
       try {
-        const res = await api.searchModules(debounced, 30)
+        const res = await api.searchModules(debounced, PAGE_SIZE, 0)
         if (cancelled) return
         setItems(res.modules)
+        setTotal(res.total)
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : 'Failed to load modules')
+          setItems([])
+          setTotal(0)
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -112,6 +135,30 @@ export function Documentation() {
       cancelled = true
     }
   }, [debounced])
+
+  async function loadMore() {
+    setLoadingMore(true)
+    setError('')
+    try {
+      const res = await api.searchModules(debounced, PAGE_SIZE, items.length)
+      setItems((prev) => {
+        const seen = new Set(prev.map((m) => m.full_name))
+        const next = [...prev]
+        for (const m of res.modules) {
+          if (!seen.has(m.full_name)) {
+            seen.add(m.full_name)
+            next.push(m)
+          }
+        }
+        return next
+      })
+      setTotal(res.total)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load more modules')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   async function openModule(m: ModuleSummary) {
     setDetailLoading(true)
@@ -126,30 +173,59 @@ export function Documentation() {
     }
   }
 
-  const subtitle = useMemo(
-    () =>
-      debounced
-        ? `Module results for “${debounced}” — examples from the Terraform Registry`
-        : 'Popular modules and every published example from the Terraform Registry',
-    [debounced],
-  )
+  const subtitle = useMemo(() => {
+    if (!debounced) {
+      return 'Browse Registry modules — filter by provider, then open every published example'
+    }
+    const shown = items.length
+    if (total > 0) {
+      return `Showing ${shown.toLocaleString()} of ${total.toLocaleString()} modules for “${debounced}”`
+    }
+    return `Module results for “${debounced}”`
+  }, [debounced, items.length, total])
+
+  const canLoadMore = !loading && items.length > 0 && items.length < total
 
   return (
     <AppShell title="Documentation" subtitle={subtitle} wide>
-      <div className="mb-5">
+      <div className="mb-5 space-y-4">
         <label className="block">
           <span className="mb-1.5 block text-base font-bold text-ink">Search modules</span>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="vpc, terraform-aws-modules/vpc/aws, eks…"
+            placeholder="aws, azurerm, vpc, terraform-aws-modules/vpc/aws…"
             className="field w-full max-w-xl"
             autoFocus
           />
         </label>
-        <p className="mt-2 text-sm text-ink-muted">
-          Select a module to load its registry docs snippet and every example folder the publisher
-          registered.
+
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Provider filters">
+          {PROVIDER_CHIPS.map((chip) => {
+            const active =
+              chip.q === ''
+                ? debounced === ''
+                : debounced.toLowerCase() === chip.q || query.toLowerCase() === chip.q
+            return (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => setQuery(chip.q)}
+                className={`border px-3 py-1.5 text-sm font-bold transition-colors ${
+                  active
+                    ? 'border-ember-deep bg-ember-deep text-panel'
+                    : 'border-line bg-panel/80 text-ink hover:bg-paper-deep'
+                }`}
+              >
+                {chip.label}
+              </button>
+            )
+          })}
+        </div>
+
+        <p className="text-sm text-ink-muted">
+          Provider names (aws, azurerm, google…) load the full registry set for that cloud. Module
+          names (vpc, eks…) filter by title. Select a row to copy snippets and browse every example.
         </p>
       </div>
 
@@ -166,51 +242,69 @@ export function Documentation() {
           ) : items.length === 0 ? (
             <p className="text-sm text-ink-muted">No modules matched.</p>
           ) : (
-            <ul className="divide-y divide-line border border-line bg-panel/80">
-              {items.map((m) => {
-                const active =
-                  selected?.module.namespace === m.namespace &&
-                  selected?.module.name === m.name &&
-                  selected?.module.provider === m.provider
-                return (
-                  <li key={m.full_name}>
-                    <button
-                      type="button"
-                      onClick={() => void openModule(m)}
-                      className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-paper-deep/70 ${
-                        active ? 'bg-paper-deep/90' : ''
-                      }`}
-                    >
-                      {m.logo_url ? (
-                        <img
-                          src={m.logo_url}
-                          alt=""
-                          className="mt-0.5 size-8 object-contain"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <span className="mt-0.5 flex size-8 items-center justify-center bg-paper-deep text-xs font-bold text-ink-muted">
-                          {m.provider.slice(0, 2).toUpperCase()}
-                        </span>
-                      )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium text-ink">{m.full_name}</span>
-                        <span className="mt-0.5 block text-xs text-ink-muted">
-                          {m.version ? `v${m.version}` : 'latest'}
-                          {m.verified ? ' · verified' : ''}
-                          {` · ${formatDownloads(m.downloads)} downloads`}
-                        </span>
-                        {m.description && (
-                          <span className="mt-1 line-clamp-2 block text-xs text-ink-muted">
-                            {m.description}
+            <>
+              <p className="mb-2 text-sm text-ink-muted">
+                {items.length.toLocaleString()}
+                {total > items.length ? ` of ${formatTotal(total)}` : ''} modules
+              </p>
+              <ul className="max-h-[70vh] divide-y divide-line overflow-y-auto border border-line bg-panel/80">
+                {items.map((m) => {
+                  const active =
+                    selected?.module.namespace === m.namespace &&
+                    selected?.module.name === m.name &&
+                    selected?.module.provider === m.provider
+                  return (
+                    <li key={m.full_name}>
+                      <button
+                        type="button"
+                        onClick={() => void openModule(m)}
+                        className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-paper-deep/70 ${
+                          active ? 'bg-paper-deep/90' : ''
+                        }`}
+                      >
+                        {m.logo_url ? (
+                          <img
+                            src={m.logo_url}
+                            alt=""
+                            className="mt-0.5 size-8 object-contain"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="mt-0.5 flex size-8 items-center justify-center bg-paper-deep text-xs font-bold text-ink-muted">
+                            {m.provider.slice(0, 2).toUpperCase()}
                           </span>
                         )}
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-ink">{m.full_name}</span>
+                          <span className="mt-0.5 block text-xs text-ink-muted">
+                            {m.version ? `v${m.version}` : 'latest'}
+                            {m.verified ? ' · verified' : ''}
+                            {` · ${formatDownloads(m.downloads)} downloads`}
+                          </span>
+                          {m.description && (
+                            <span className="mt-1 line-clamp-2 block text-xs text-ink-muted">
+                              {m.description}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+              {canLoadMore && (
+                <button
+                  type="button"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  className="btn-secondary mt-3 w-full text-base"
+                >
+                  {loadingMore
+                    ? 'Loading…'
+                    : `Load more (${(total - items.length).toLocaleString()} remaining)`}
+                </button>
+              )}
+            </>
           )}
         </section>
 
