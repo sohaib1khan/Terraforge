@@ -17,6 +17,8 @@ type Config struct {
 	MigrationsDir     string
 	RunnerImage       string
 	RunTimeoutSeconds int
+	RunnerVolumesFrom string
+	HostDataDir       string
 }
 
 func Load() (Config, error) {
@@ -30,6 +32,8 @@ func Load() (Config, error) {
 		MigrationsDir:     getenv("MIGRATIONS_DIR", "migrations"),
 		RunnerImage:       getenv("RUNNER_IMAGE", "terraforge-runner:local"),
 		RunTimeoutSeconds: getenvInt("RUN_TIMEOUT_SECONDS", 600),
+		RunnerVolumesFrom: os.Getenv("RUNNER_VOLUMES_FROM"),
+		HostDataDir:       os.Getenv("HOST_DATA_DIR"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")

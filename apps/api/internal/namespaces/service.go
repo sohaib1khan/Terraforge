@@ -40,6 +40,7 @@ type Namespace struct {
 	DriftIntervalMinutes *int       `json:"drift_interval_minutes"`
 	HasDrift             bool       `json:"has_drift"`
 	DriftDetectedAt      *time.Time `json:"drift_detected_at,omitempty"`
+	IsPlayground         bool       `json:"is_playground"`
 	CreatedAt            time.Time  `json:"created_at"`
 	Status               Status     `json:"status"`
 }
@@ -48,6 +49,7 @@ type CreateInput struct {
 	Name             string
 	Slug             string
 	TerraformVersion string
+	IsPlayground     bool
 }
 
 type Service struct {
@@ -63,7 +65,7 @@ const nsSelect = `
 	SELECT
 		n.id, n.name, n.slug, n.terraform_version, n.has_remote,
 		n.remote_url, n.default_branch, n.require_approval, n.drift_interval_minutes,
-		n.has_drift, n.drift_detected_at, n.created_at,
+		n.has_drift, n.drift_detected_at, n.is_playground, n.created_at,
 		(
 			SELECT r.status::text
 			FROM runs r
@@ -129,6 +131,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Namespace, error)
 	}
 
 	const defaultBranch = "main"
+	isPlayground := in.IsPlayground
+	requireApproval := false
+	if isPlayground {
+		requireApproval = false
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -138,14 +145,14 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Namespace, error)
 
 	var ns Namespace
 	err = tx.QueryRow(ctx, `
-		INSERT INTO namespaces (name, slug, terraform_version, default_branch)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO namespaces (name, slug, terraform_version, default_branch, is_playground, require_approval)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, name, slug, terraform_version, has_remote, remote_url, default_branch,
-		          require_approval, drift_interval_minutes, has_drift, drift_detected_at, created_at
-	`, name, slug, tfVersion, defaultBranch).Scan(
+		          require_approval, drift_interval_minutes, has_drift, drift_detected_at, is_playground, created_at
+	`, name, slug, tfVersion, defaultBranch, isPlayground, requireApproval).Scan(
 		&ns.ID, &ns.Name, &ns.Slug, &ns.TerraformVersion, &ns.HasRemote,
 		&ns.RemoteURL, &ns.DefaultBranch, &ns.RequireApproval, &ns.DriftIntervalMinutes,
-		&ns.HasDrift, &ns.DriftDetectedAt, &ns.CreatedAt,
+		&ns.HasDrift, &ns.DriftDetectedAt, &ns.IsPlayground, &ns.CreatedAt,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -287,7 +294,7 @@ func scanNamespace(row scannable) (Namespace, error) {
 	if err := row.Scan(
 		&ns.ID, &ns.Name, &ns.Slug, &ns.TerraformVersion, &ns.HasRemote,
 		&ns.RemoteURL, &ns.DefaultBranch, &ns.RequireApproval, &ns.DriftIntervalMinutes,
-		&ns.HasDrift, &ns.DriftDetectedAt, &ns.CreatedAt, &lastRun,
+		&ns.HasDrift, &ns.DriftDetectedAt, &ns.IsPlayground, &ns.CreatedAt, &lastRun,
 	); err != nil {
 		return Namespace{}, err
 	}

@@ -135,8 +135,20 @@ export type Namespace = {
   drift_interval_minutes: number | null
   has_drift: boolean
   drift_detected_at?: string | null
+  is_playground?: boolean
   created_at: string
   status: NamespaceStatus
+}
+
+export type PlaygroundTemplate = {
+  id: string
+  owner_user_id: string
+  name: string
+  description: string
+  files: Record<string, string>
+  source_namespace_id?: string | null
+  created_at: string
+  updated_at: string
 }
 
 export type FileNode = {
@@ -371,13 +383,22 @@ export const api = {
   enableUser: (id: string) =>
     request<User>(`/api/users/${id}/enable`, { method: 'POST' }),
 
-  listNamespaces: () => request<{ namespaces: Namespace[] }>('/api/namespaces'),
+  listNamespaces: (opts?: { playground?: boolean }) => {
+    const q =
+      opts?.playground === true
+        ? '?playground=true'
+        : opts?.playground === false
+          ? '?playground=false'
+          : ''
+    return request<{ namespaces: Namespace[] }>(`/api/namespaces${q}`)
+  },
   createNamespace: (body: {
     name: string
     slug?: string
     terraform_version?: string
     remote_url?: string
     pat?: string
+    is_playground?: boolean
   }) => request<Namespace>('/api/namespaces', { method: 'POST', body: JSON.stringify(body) }),
   getNamespace: (id: string) => request<Namespace>(`/api/namespaces/${id}`),
   updateNamespaceSettings: (
@@ -578,6 +599,44 @@ export const api = {
   getGraph: (id: string) => request<ConfigGraph>(`/api/namespaces/${id}/graph`),
   getSuggestions: (id: string) =>
     request<Suggestions>(`/api/namespaces/${id}/suggestions`),
+
+  listPlaygroundTemplates: () =>
+    request<{ templates: PlaygroundTemplate[] }>('/api/playground/templates'),
+  getPlaygroundTemplate: (id: string) =>
+    request<PlaygroundTemplate>(`/api/playground/templates/${id}`),
+  createPlaygroundTemplate: (body: {
+    name: string
+    description?: string
+    files: Record<string, string>
+    source_namespace_id?: string
+  }) =>
+    request<PlaygroundTemplate>('/api/playground/templates', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updatePlaygroundTemplate: (
+    id: string,
+    body: { name?: string; description?: string; files?: Record<string, string> },
+  ) =>
+    request<PlaygroundTemplate>(`/api/playground/templates/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deletePlaygroundTemplate: (id: string) =>
+    request<void>(`/api/playground/templates/${id}`, { method: 'DELETE' }),
+  launchPlaygroundTemplate: (id: string, body?: { name?: string; slug?: string }) =>
+    request<{ namespace: Namespace; template: PlaygroundTemplate }>(
+      `/api/playground/templates/${id}/launch`,
+      { method: 'POST', body: JSON.stringify(body ?? {}) },
+    ),
+  savePlaygroundFromNamespace: (
+    namespaceId: string,
+    body?: { name?: string; description?: string },
+  ) =>
+    request<PlaygroundTemplate>(`/api/playground/namespaces/${namespaceId}/save-template`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
 }
 
 export function runLogsWsUrl(namespaceId: string, runId: string): string {

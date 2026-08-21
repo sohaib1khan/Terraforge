@@ -96,11 +96,11 @@ func (s *Service) CreateFromRemote(ctx context.Context, in CreateFromRemoteInput
 		INSERT INTO namespaces (name, slug, terraform_version, default_branch, has_remote, remote_url)
 		VALUES ($1, $2, $3, $4, true, $5)
 		RETURNING id, name, slug, terraform_version, has_remote, remote_url, default_branch,
-		          require_approval, drift_interval_minutes, has_drift, drift_detected_at, created_at
+		          require_approval, drift_interval_minutes, has_drift, drift_detected_at, is_playground, created_at
 	`, name, slug, tfVersion, defaultBranch, remoteURL).Scan(
 		&ns.ID, &ns.Name, &ns.Slug, &ns.TerraformVersion, &ns.HasRemote,
 		&ns.RemoteURL, &ns.DefaultBranch, &ns.RequireApproval, &ns.DriftIntervalMinutes,
-		&ns.HasDrift, &ns.DriftDetectedAt, &ns.CreatedAt,
+		&ns.HasDrift, &ns.DriftDetectedAt, &ns.IsPlayground, &ns.CreatedAt,
 	)
 	if err != nil {
 		return Namespace{}, err

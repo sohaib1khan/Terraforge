@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +26,12 @@ import (
 type Config struct {
 	RunnerImage string
 	Timeout     time.Duration
+	// VolumesFrom is the worker container name for --volumes-from (docker.sock).
+	VolumesFrom string
+	// DataDir is the in-container data root (e.g. /data).
+	DataDir string
+	// HostDataDir is the same data root as seen by the Docker daemon (optional).
+	HostDataDir string
 }
 
 type Executor struct {
@@ -136,13 +143,23 @@ func (e *Executor) handle(ctx context.Context, job queue.RunJob) error {
 	}
 
 	container := "terraforge-" + job.RunID
+	hostRepo := ""
+	if e.cfg.HostDataDir != "" && e.cfg.DataDir != "" {
+		dataDir := filepath.Clean(e.cfg.DataDir)
+		repo := filepath.Clean(job.RepoPath)
+		if repo == dataDir || strings.HasPrefix(repo, dataDir+string(os.PathSeparator)) {
+			hostRepo = filepath.Join(e.cfg.HostDataDir, strings.TrimPrefix(repo, dataDir))
+		}
+	}
 	runErr := runner.Run(ctx, runner.Options{
-		Image:     e.cfg.RunnerImage,
-		RepoPath:  job.RepoPath,
-		RunType:   job.Type,
-		Timeout:   e.cfg.Timeout,
-		Container: container,
-		Env:       env,
+		Image:        e.cfg.RunnerImage,
+		RepoPath:     job.RepoPath,
+		HostRepoPath: hostRepo,
+		VolumesFrom:  e.cfg.VolumesFrom,
+		RunType:      job.Type,
+		Timeout:      e.cfg.Timeout,
+		Container:    container,
+		Env:          env,
 	}, onLog)
 
 	if e.isCanceled(ctx, job.RunID) {

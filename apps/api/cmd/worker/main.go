@@ -49,6 +49,9 @@ func main() {
 	ex := executor.New(pool, q.Redis(), executor.Config{
 		RunnerImage: cfg.RunnerImage,
 		Timeout:     time.Duration(cfg.RunTimeoutSeconds) * time.Second,
+		VolumesFrom: cfg.RunnerVolumesFrom,
+		DataDir:     cfg.DataDir,
+		HostDataDir: cfg.HostDataDir,
 	}, secretsSvc)
 	if err := ex.Run(ctx); err != nil && err != context.Canceled {
 		log.Fatalf("worker: %v", err)

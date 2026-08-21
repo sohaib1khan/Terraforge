@@ -22,6 +22,13 @@ type Options struct {
 	Timeout   time.Duration
 	Container string
 	Env       map[string]string
+	// VolumesFrom, when set, shares that container's mounts (needed when the
+	// worker talks to the host Docker daemon via docker.sock — a -v of a
+	// container path like /data/... would resolve on the host and be empty).
+	VolumesFrom string
+	// HostRepoPath overrides the bind-mount source when VolumesFrom is empty
+	// (map DATA_DIR → host path via HOST_DATA_DIR).
+	HostRepoPath string
 }
 
 func Run(ctx context.Context, opts Options, onLog LogFunc) error {
@@ -48,10 +55,17 @@ func Run(ctx context.Context, opts Options, onLog LogFunc) error {
 	args := []string{
 		"run", "--rm",
 		"--name", name,
-		"-v", opts.RepoPath + ":/workspace",
-		"-w", "/workspace",
-		"-e", "RUN_TYPE=" + opts.RunType,
 	}
+	if opts.VolumesFrom != "" {
+		args = append(args, "--volumes-from", opts.VolumesFrom, "-w", opts.RepoPath)
+	} else {
+		mountSrc := opts.RepoPath
+		if opts.HostRepoPath != "" {
+			mountSrc = opts.HostRepoPath
+		}
+		args = append(args, "-v", mountSrc+":/workspace", "-w", "/workspace")
+	}
+	args = append(args, "-e", "RUN_TYPE="+opts.RunType)
 	for k, v := range opts.Env {
 		if k == "" || strings.ContainsAny(k, "=\x00") {
 			continue

@@ -168,6 +168,7 @@ type createRequest struct {
 	TerraformVersion string `json:"terraform_version"`
 	RemoteURL        string `json:"remote_url"`
 	PAT              string `json:"pat"`
+	IsPlayground     bool   `json:"is_playground"`
 }
 
 type settingsRequest struct {
@@ -194,6 +195,23 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []Namespace{}
 	}
+	if playgroundOnly := strings.EqualFold(r.URL.Query().Get("playground"), "true"); playgroundOnly {
+		filtered := make([]Namespace, 0, len(items))
+		for _, ns := range items {
+			if ns.IsPlayground {
+				filtered = append(filtered, ns)
+			}
+		}
+		items = filtered
+	} else if excludePlayground := strings.EqualFold(r.URL.Query().Get("playground"), "false"); excludePlayground {
+		filtered := make([]Namespace, 0, len(items))
+		for _, ns := range items {
+			if !ns.IsPlayground {
+				filtered = append(filtered, ns)
+			}
+		}
+		items = filtered
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"namespaces": items})
 }
 
@@ -213,6 +231,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		ns  Namespace
 		err error
 	)
+	if req.IsPlayground && strings.TrimSpace(req.RemoteURL) != "" {
+		httpx.WriteError(w, http.StatusBadRequest, "playground namespaces cannot use a remote git URL")
+		return
+	}
 	if strings.TrimSpace(req.RemoteURL) != "" {
 		ns, err = h.svc.CreateFromRemote(r.Context(), CreateFromRemoteInput{
 			Name:             req.Name,
@@ -226,6 +248,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			Name:             req.Name,
 			Slug:             req.Slug,
 			TerraformVersion: req.TerraformVersion,
+			IsPlayground:     req.IsPlayground,
 		})
 	}
 	if err != nil {

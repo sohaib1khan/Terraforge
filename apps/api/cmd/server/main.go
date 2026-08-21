@@ -24,6 +24,7 @@ import (
 	"github.com/terraforge/terraforge/apps/api/internal/members"
 	"github.com/terraforge/terraforge/apps/api/internal/modules"
 	"github.com/terraforge/terraforge/apps/api/internal/namespaces"
+	"github.com/terraforge/terraforge/apps/api/internal/playground"
 	"github.com/terraforge/terraforge/apps/api/internal/providers"
 	"github.com/terraforge/terraforge/apps/api/internal/queue"
 	"github.com/terraforge/terraforge/apps/api/internal/runs"
@@ -97,6 +98,8 @@ func main() {
 	providersHandler := providers.NewHandler(providers.NewService())
 	modulesHandler := modules.NewHandler(modules.NewService())
 	graphHandler := tfgraph.NewHandler(nsSvc, tfstateSvc, gate)
+	playgroundSvc := playground.NewService(pool, nsSvc)
+	playgroundHandler := playground.NewHandler(playgroundSvc, nsSvc, membersSvc, auditSvc, gate)
 
 	go drift.NewScheduler(nsSvc, runsSvc, auditSvc).Start(ctx)
 
@@ -128,6 +131,7 @@ func main() {
 	providersHandler.Register(mux, authHandler.Middleware)
 	modulesHandler.Register(mux, authHandler.Middleware)
 	graphHandler.Register(mux, authHandler.Middleware)
+	playgroundHandler.Register(mux, authHandler.Middleware)
 	tfstateHandler.Register(mux)
 	tfstateHandler.RegisterUI(mux, authHandler.Middleware, gate)
 

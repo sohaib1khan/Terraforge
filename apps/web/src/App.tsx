@@ -6,6 +6,7 @@ import { Documentation } from './pages/Documentation'
 import { FirstRunSetup } from './pages/FirstRunSetup'
 import { Login } from './pages/Login'
 import { NamespaceView } from './pages/NamespaceView'
+import { Playground } from './pages/Playground'
 import { Providers } from './pages/Providers'
 import { Settings } from './pages/Settings'
 import { Templates } from './pages/Templates'
@@ -48,6 +49,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Templates />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/playground"
+        element={
+          <RequireAuth>
+            <Playground />
           </RequireAuth>
         }
       />

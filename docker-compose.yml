@@ -61,6 +61,7 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile.worker
+    container_name: terraforge-worker
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-terraforge}:${POSTGRES_PASSWORD:-terraforge}@postgres:5432/${POSTGRES_DB:-terraforge}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
@@ -68,6 +69,8 @@ services:
       DATA_DIR: /data
       RUNNER_IMAGE: ${RUNNER_IMAGE:-terraforge-runner:local}
       RUN_TIMEOUT_SECONDS: ${RUN_TIMEOUT_SECONDS:-600}
+      # Share this container's /data mount with runner jobs (docker.sock path fix)
+      RUNNER_VOLUMES_FROM: terraforge-worker
     volumes:
       - terraforge_data:/data
       - /var/run/docker.sock:/var/run/docker.sock

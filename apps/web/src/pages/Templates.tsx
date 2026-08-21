@@ -4,8 +4,13 @@ import { api, ApiError, type Namespace } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import { EnvIcon } from '../components/EnvironmentPanel/envVisuals'
 import {
+  nextTemplate,
+  previousTemplate,
   TF_TEMPLATES,
+  TRACK_META,
   templateFilesMap,
+  templatesForTrack,
+  type TemplateTrack,
   type TfTemplate,
 } from '../lib/templates'
 
@@ -20,8 +25,21 @@ const CLOUD_PROVIDER: Record<TfTemplate['cloud'], string> = {
   aws: 'aws',
   azure: 'azurerm',
   google: 'google',
+  docker: 'docker',
+  virtualbox: 'virtualbox',
+  qemu: 'qemu',
   multi: 'local',
 }
+
+const FILTERS: Array<{ id: 'all' | TemplateTrack; label: string }> = [
+  { id: 'all', label: 'All tracks' },
+  { id: 'foundation', label: TRACK_META.foundation.label },
+  { id: 'language', label: TRACK_META.language.label },
+  { id: 'docker', label: TRACK_META.docker.label },
+  { id: 'virtualbox', label: TRACK_META.virtualbox.label },
+  { id: 'qemu', label: TRACK_META.qemu.label },
+  { id: 'cloud', label: TRACK_META.cloud.label },
+]
 
 function FilePreview({ path, content }: { path: string; content: string }) {
   const [copied, setCopied] = useState(false)
@@ -51,7 +69,7 @@ function FilePreview({ path, content }: { path: string; content: string }) {
 
 export function Templates() {
   const navigate = useNavigate()
-  const [filter, setFilter] = useState<'all' | TfTemplate['cloud']>('all')
+  const [filter, setFilter] = useState<'all' | TemplateTrack>('all')
   const [selectedId, setSelectedId] = useState(TF_TEMPLATES[0]?.id ?? '')
   const [namespaces, setNamespaces] = useState<Namespace[]>([])
   const [targetId, setTargetId] = useState('')
@@ -60,15 +78,20 @@ export function Templates() {
   const [note, setNote] = useState('')
   const [loadedNs, setLoadedNs] = useState(false)
 
-  const selected = useMemo(
-    () => TF_TEMPLATES.find((t) => t.id === selectedId) ?? TF_TEMPLATES[0],
-    [selectedId],
-  )
+  const list = useMemo(() => templatesForTrack(filter), [filter])
 
-  const list = useMemo(() => {
-    if (filter === 'all') return TF_TEMPLATES
-    return TF_TEMPLATES.filter((t) => t.cloud === filter)
-  }, [filter])
+  const selected = useMemo(() => {
+    const fromList = list.find((t) => t.id === selectedId)
+    if (fromList) return fromList
+    return list[0] ?? TF_TEMPLATES[0]
+  }, [list, selectedId])
+
+  const prev = selected ? previousTemplate(selected) : undefined
+  const next = selected ? nextTemplate(selected) : undefined
+  const trackMeta = selected ? TRACK_META[selected.track] : null
+  const trackLen = selected
+    ? TF_TEMPLATES.filter((t) => t.track === selected.track).length
+    : 0
 
   async function ensureNamespaces() {
     if (loadedNs) return
@@ -89,11 +112,7 @@ export function Templates() {
     setNote('')
     try {
       const ns = await api.createNamespace({ name: selected.title })
-      await api.importFiles(
-        ns.id,
-        templateFilesMap(selected),
-        `Seed template: ${selected.id}`,
-      )
+      await api.importFiles(ns.id, templateFilesMap(selected), `Seed template: ${selected.id}`)
       setNote(`Created “${ns.name}” and loaded the template.`)
       navigate(`/namespaces/${ns.id}`)
     } catch (err) {
@@ -116,11 +135,7 @@ export function Templates() {
     setError('')
     setNote('')
     try {
-      await api.importFiles(
-        targetId,
-        templateFilesMap(selected),
-        `Import template: ${selected.id}`,
-      )
+      await api.importFiles(targetId, templateFilesMap(selected), `Import template: ${selected.id}`)
       setNote('Template imported.')
       navigate(`/namespaces/${targetId}`)
     } catch (err) {
@@ -132,9 +147,7 @@ export function Templates() {
 
   async function copyAll() {
     if (!selected) return
-    const blob = selected.files
-      .map((f) => `// ===== ${f.path} =====\n${f.content}`)
-      .join('\n\n')
+    const blob = selected.files.map((f) => `// ===== ${f.path} =====\n${f.content}`).join('\n\n')
     try {
       await navigator.clipboard.writeText(blob)
       setNote('All template files copied to clipboard.')
@@ -146,33 +159,39 @@ export function Templates() {
   return (
     <AppShell
       title="Templates"
-      subtitle="Complete beginner samples — pick one, load it into a namespace, then Init → Plan → Apply"
+      subtitle="Learning tracks that build on each other — local first, then Docker, VirtualBox, QEMU/libvirt, then tiny cloud starters"
       wide
     >
-      <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="Filter by environment">
-        {(
-          [
-            ['all', 'All'],
-            ['local', 'Local (no cloud)'],
-            ['aws', 'AWS'],
-            ['azure', 'Azure'],
-            ['google', 'Google Cloud'],
-          ] as const
-        ).map(([id, label]) => (
+      <p className="mb-4 text-sm text-ink-muted">
+        Providers come from the public Terraform Registry (kreuzwerker/docker, terra-farm/virtualbox,
+        dmacvicar/libvirt, HashiCorp local/aws/…). Lessons are intentionally small — not production
+        blueprints.
+      </p>
+
+      <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="Filter by learning track">
+        {FILTERS.map((f) => (
           <button
-            key={id}
+            key={f.id}
             type="button"
-            onClick={() => setFilter(id)}
+            onClick={() => {
+              setFilter(f.id)
+              const first = templatesForTrack(f.id)[0]
+              if (first) setSelectedId(first.id)
+            }}
             className={`border px-3 py-1.5 text-sm font-bold transition-colors ${
-              filter === id
+              filter === f.id
                 ? 'border-ember-deep bg-ember-deep text-panel'
                 : 'border-line bg-panel/80 text-ink hover:bg-paper-deep'
             }`}
           >
-            {label}
+            {f.label}
           </button>
         ))}
       </div>
+
+      {filter !== 'all' && (
+        <p className="mb-4 text-sm text-ink-muted">{TRACK_META[filter].blurb}</p>
+      )}
 
       {error && (
         <p className="mb-4 text-base font-medium text-danger" role="alert">
@@ -187,7 +206,7 @@ export function Templates() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
         <section className="min-w-0">
-          <ul className="divide-y divide-line border-2 border-line bg-panel/90">
+          <ul className="max-h-[70vh] divide-y divide-line overflow-y-auto border-2 border-line bg-panel/90">
             {list.map((t) => {
               const active = t.id === selected?.id
               return (
@@ -202,11 +221,19 @@ export function Templates() {
                     <EnvIcon name={CLOUD_PROVIDER[t.cloud]} size={32} />
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-ember-deep">
+                          {TRACK_META[t.track].label.split('·')[0].trim()} · {t.step}
+                        </span>
                         <span className="font-bold text-ink">{t.title}</span>
+                      </span>
+                      <span className="mt-1 flex flex-wrap items-center gap-2">
                         <span className="border border-line bg-paper px-2 py-0.5 text-xs font-bold text-ink-muted">
                           {LEVEL_LABEL[t.level]}
                         </span>
                         <span className="text-xs text-ink-muted">{t.time}</span>
+                        {t.buildsOn && (
+                          <span className="text-xs text-ink-muted">builds on prior lesson</span>
+                        )}
                       </span>
                       <span className="mt-1 block text-sm text-ink-muted">{t.blurb}</span>
                     </span>
@@ -218,19 +245,45 @@ export function Templates() {
         </section>
 
         <section className="min-w-0 space-y-4">
-          {selected && (
+          {selected && trackMeta && (
             <>
               <div className="border-2 border-line bg-panel/90 p-4">
                 <div className="flex flex-wrap items-start gap-3">
                   <EnvIcon name={CLOUD_PROVIDER[selected.cloud]} size={40} />
                   <div className="min-w-0 flex-1">
-                    <h2 className="font-display text-2xl font-bold text-ink">{selected.title}</h2>
+                    <p className="text-sm font-bold text-ember-deep">
+                      {trackMeta.label} · lesson {selected.step} of {trackLen}
+                    </p>
+                    <h2 className="mt-1 font-display text-2xl font-bold text-ink">{selected.title}</h2>
                     <p className="mt-1 text-base text-ink-muted">{selected.blurb}</p>
                     <p className="mt-2 text-sm text-ink-muted">
                       {LEVEL_LABEL[selected.level]} · {selected.time} · {selected.files.length} files
                     </p>
                   </div>
                 </div>
+
+                {(prev || next) && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {prev && (
+                      <button
+                        type="button"
+                        className="btn-secondary btn-compact"
+                        onClick={() => setSelectedId(prev.id)}
+                      >
+                        ← {prev.title}
+                      </button>
+                    )}
+                    {next && (
+                      <button
+                        type="button"
+                        className="btn-secondary btn-compact"
+                        onClick={() => setSelectedId(next.id)}
+                      >
+                        Next: {next.title} →
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div>

@@ -47,6 +47,9 @@ export function AppShell({
           <NavLink to="/templates" className={linkClass}>
             Templates
           </NavLink>
+          <NavLink to="/playground" className={linkClass}>
+            Playground
+          </NavLink>
           <NavLink to="/providers" className={linkClass}>
             Providers
           </NavLink>

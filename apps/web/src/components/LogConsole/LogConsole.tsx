@@ -7,6 +7,7 @@ type Props = {
   runId: string | null
   run?: Run | null
   fill?: boolean
+  onLogLine?: (line: string) => void
 }
 
 type WsMsg = {
@@ -28,7 +29,7 @@ function formatElapsed(ms: number): string {
   return `${m}m ${rem.toString().padStart(2, '0')}s`
 }
 
-export function LogConsole({ namespaceId, runId, run, fill }: Props) {
+export function LogConsole({ namespaceId, runId, run, fill, onLogLine }: Props) {
   const [lines, setLines] = useState<string[]>([])
   const [status, setStatus] = useState<string>('')
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -36,6 +37,8 @@ export function LogConsole({ namespaceId, runId, run, fill }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const preRef = useRef<HTMLPreElement>(null)
   const stickRef = useRef(true)
+  const onLogLineRef = useRef(onLogLine)
+  onLogLineRef.current = onLogLine
 
   const live = isLive(status, run?.status)
   const runType = (run?.type ?? 'run').toUpperCase()
@@ -58,6 +61,7 @@ export function LogConsole({ namespaceId, runId, run, fill }: Props) {
         const msg = JSON.parse(String(ev.data)) as WsMsg
         if (msg.type === 'log' && msg.line != null) {
           setLines((prev) => [...prev, msg.line!])
+          onLogLineRef.current?.(msg.line!)
         } else if (msg.type === 'status' && msg.status) {
           setStatus(msg.status)
         }

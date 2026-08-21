@@ -122,6 +122,27 @@ const STYLES: Record<string, EnvStyle> = {
     accent: '#2496ED',
     glyph: 'dk',
   },
+  virtualbox: {
+    bg: 'color-mix(in srgb, #183A61 18%, transparent)',
+    border: '#183A61',
+    text: '#0F2440',
+    accent: '#183A61',
+    glyph: 'vb',
+  },
+  qemu: {
+    bg: 'color-mix(in srgb, #FF6600 22%, transparent)',
+    border: '#CC5200',
+    text: '#7A3100',
+    accent: '#FF6600',
+    glyph: 'qm',
+  },
+  libvirt: {
+    bg: 'color-mix(in srgb, #FF6600 22%, transparent)',
+    border: '#CC5200',
+    text: '#7A3100',
+    accent: '#FF6600',
+    glyph: 'lv',
+  },
   oci: {
     bg: 'color-mix(in srgb, #C74634 22%, transparent)',
     border: '#A03828',

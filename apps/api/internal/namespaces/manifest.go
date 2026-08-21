@@ -139,3 +139,22 @@ func (s *Service) ExportTarGz(nsID string) ([]byte, ConfigManifest, error) {
 	}
 	return buf.Bytes(), manifest, nil
 }
+
+// ExportFilesMap returns tracked config files as path → content for playground templates.
+func (s *Service) ExportFilesMap(nsID string) (map[string]string, error) {
+	manifest, err := s.ConfigManifest(nsID)
+	if err != nil {
+		return nil, err
+	}
+	root := s.repoPath(nsID)
+	out := make(map[string]string, len(manifest.Files))
+	for _, m := range manifest.Files {
+		full := filepath.Join(root, filepath.FromSlash(m.Path))
+		data, err := os.ReadFile(full)
+		if err != nil {
+			return nil, err
+		}
+		out[m.Path] = string(data)
+	}
+	return out, nil
+}

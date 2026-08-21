@@ -1,9 +1,10 @@
 #!/bin/sh
 set -eu
 
-cd /workspace
+# Workdir is set by the worker (`-w /workspace` or namespace path via --volumes-from).
+# Do not hardcode /workspace — docker.sock mounts need the shared volume path.
 
-echo "==> terraforge runner: ${RUN_TYPE:-unknown}"
+echo "==> terraforge runner: ${RUN_TYPE:-unknown} ($(pwd))"
 
 case "${RUN_TYPE}" in
   init)

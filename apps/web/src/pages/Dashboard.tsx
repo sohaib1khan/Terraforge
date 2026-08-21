@@ -74,7 +74,7 @@ export function Dashboard() {
     if (opts?.soft) setRefreshing(true)
     else setLoading(true)
     try {
-      const res = await api.listNamespaces()
+      const res = await api.listNamespaces({ playground: false })
       const rows = await Promise.all(
         res.namespaces.map(async (ns) => {
           const [graph, runs, suggestions] = await Promise.all([
