@@ -13,13 +13,14 @@ import {
 import { AppShell } from '../components/AppShell'
 import { CodeEditor } from '../components/Editor/Editor'
 import { collectFilePaths } from '../components/Editor/FileTree'
-import { LogConsole } from '../components/LogConsole/LogConsole'
 import {
   applyLogLineToDeploy,
   DeployMap,
   parsePlanResources,
   type NodeDeployState,
 } from '../components/Playground/DeployMap'
+import { HorizontalSplit, VerticalSplit } from '../components/Playground/ResizableLayout'
+import { TerraformCLI } from '../components/Playground/TerraformCLI'
 import {
   detectNonLocalProviders,
   playgroundStarters,
@@ -40,37 +41,34 @@ function hoodFromRun(run: Run | null): HoodStep {
 
 function UnderTheHood({ step }: { step: HoodStep }) {
   const steps: Array<{ id: HoodStep; label: string; blurb: string }> = [
-    { id: 'queue', label: 'Queue', blurb: 'Run enqueued in Redis' },
-    { id: 'lock', label: 'Worker lock', blurb: 'One worker claims the job' },
-    { id: 'runner', label: 'Runner', blurb: 'Docker Terraform container' },
-    { id: 'state', label: 'State', blurb: 'Backend updated / settled' },
+    { id: 'queue', label: 'Queue', blurb: 'Redis' },
+    { id: 'lock', label: 'Lock', blurb: 'Worker' },
+    { id: 'runner', label: 'Runner', blurb: 'Docker TF' },
+    { id: 'state', label: 'State', blurb: 'Backend' },
   ]
   const order: HoodStep[] = ['queue', 'lock', 'runner', 'state']
   const activeIdx = order.indexOf(step)
   return (
-    <section className="border-2 border-line/70 bg-panel/70 p-4">
-      <h2 className="font-display text-lg font-bold">Under the hood</h2>
-      <p className="mt-1 text-base text-ink-muted">
-        Same pipeline as namespaces: queue → worker → runner → state backend.
-      </p>
-      <ol className="mt-3 grid gap-2 sm:grid-cols-4">
+    <div className="flex flex-wrap items-center gap-2 border border-line/60 bg-panel/70 px-3 py-2">
+      <p className="shrink-0 text-xs font-bold uppercase tracking-wide text-ink-muted">Pipeline</p>
+      <ol className="flex min-w-0 flex-1 flex-wrap gap-1.5">
         {steps.map((s, i) => {
           const done = activeIdx > i || (step === 'state' && s.id === 'state')
           const active = step === s.id || (step === 'runner' && s.id === 'lock')
           return (
             <li
               key={s.id}
-              className={`playground-hood-step rounded border border-line/60 px-3 py-2 ${
-                active ? 'playground-hood-step-active' : done ? 'playground-hood-step-done' : ''
+              className={`playground-hood-step flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${
+                active ? 'playground-hood-step-active' : done ? 'playground-hood-step-done' : 'border-line/50'
               }`}
             >
-              <p className="text-sm font-semibold text-ink">{s.label}</p>
-              <p className="text-sm text-ink-muted">{s.blurb}</p>
+              <span className="font-semibold text-ink">{s.label}</span>
+              <span className="text-ink-muted">{s.blurb}</span>
             </li>
           )
         })}
       </ol>
-    </section>
+    </div>
   )
 }
 
@@ -298,11 +296,10 @@ export function Playground() {
     setSavedContent('__new__')
   }
 
-  async function triggerRun(type: RunType) {
+  async function triggerRun(type: RunType, command?: string) {
     if (!nsId) return
     if (dirty) {
-      alert('Save your changes before running Terraform.')
-      return
+      throw new Error('Save your changes before running Terraform.')
     }
     setRunBusy(true)
     setError('')
@@ -311,11 +308,13 @@ export function Playground() {
       const run = await api.createRun(nsId, type)
       setActiveRunId(run.id)
       setRuns((prev) => [run, ...prev])
-      if (type === 'apply' || type === 'destroy') {
-        // Keep planned overlays; live log lines will pulse nodes
+      if (command) {
+        setNote(`CLI: ${command}`)
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to start run')
+      const msg = err instanceof ApiError ? err.message : 'Failed to start run'
+      setError(msg)
+      throw err instanceof Error ? err : new Error(msg)
     } finally {
       setRunBusy(false)
     }
@@ -413,7 +412,7 @@ export function Playground() {
     return (
       <AppShell
         title="Playground"
-        subtitle="Safe local Terraform sandbox — same runner as namespaces, guided IDE + deploy map."
+        subtitle="Safe local Terraform sandbox — practice the real CLI (autocomplete + definitions)."
         wide
       >
         {error && (
@@ -426,7 +425,9 @@ export function Playground() {
         <section className="mb-8 space-y-3">
           <h2 className="font-display text-xl font-bold">Start</h2>
           <p className="text-base text-ink-muted">
-            Pick a local starter, a saved template, or a blank workspace. Cloud / Docker / VBox templates stay on{' '}
+            Pick a local starter, a saved template, or a blank workspace. In the workspace you’ll run{' '}
+            <code className="font-mono text-sm">terraform</code> in a real CLI (no action buttons). Cloud /
+            Docker / VBox templates stay on{' '}
             <Link to="/templates" className="text-ember-deep underline">
               Templates
             </Link>
@@ -529,94 +530,97 @@ export function Playground() {
   return (
     <AppShell
       title={ns?.name ?? 'Playground'}
-      subtitle="Init · Plan · Apply · Destroy — animated deploy map uses the same Docker runner."
+      subtitle="CLI + live deploy + editor — same Docker runner."
       wide
     >
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <button type="button" className="btn-secondary btn-compact" onClick={() => setSearchParams({})}>
-          ← Start screen
-        </button>
-        <Link to={`/namespaces/${nsId}`} className="btn-secondary btn-compact">
-          Full namespace view
-        </Link>
-        <button type="button" className="btn-secondary btn-compact" onClick={() => void saveAsTemplate()}>
-          Save as playground template
-        </button>
-      </div>
-
-      {error && (
-        <p className="mb-3 border border-danger/40 bg-danger/10 px-3 py-2 text-base text-danger">{error}</p>
-      )}
-      {note && (
-        <p className="mb-3 border border-moss/40 bg-moss/10 px-3 py-2 text-base text-ink">{note}</p>
-      )}
-      {providerWarning.length > 0 && (
-        <p className="mb-3 border border-warn/50 bg-warn/10 px-3 py-2 text-base text-ink">
-          This config references non-local providers ({providerWarning.join(', ')}). Playground starters stay on{' '}
-          <code className="font-mono text-sm">local</code> / <code className="font-mono text-sm">random</code>;
-          cloud templates live under Templates.
-        </p>
-      )}
-
-      <div className="mb-4 flex flex-wrap gap-2">
-        {(['init', 'plan', 'apply', 'destroy'] as RunType[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            disabled={runBusy}
-            onClick={() => void triggerRun(t)}
-            className={t === 'apply' ? 'btn-primary btn-compact capitalize' : 'btn-secondary btn-compact capitalize'}
-          >
-            {t}
+      <div className="playground-workspace space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="btn-secondary btn-compact" onClick={() => setSearchParams({})}>
+            ← Start
           </button>
-        ))}
-      </div>
-
-      <div className="mb-4">
-        <UnderTheHood step={hoodStep} />
-      </div>
-
-      <div className="mb-4">
-        <DeployMap
-          graph={graph}
-          loading={graphBusy}
-          deployStates={deployStates}
-          onRefresh={() => void refreshGraph()}
-        />
-      </div>
-
-      <div className="mb-4 min-h-[420px]">
-        <CodeEditor
-          tree={tree}
-          selectedPath={selectedPath}
-          content={content}
-          dirty={dirty}
-          saving={saving}
-          importBusy={importBusy}
-          onSelect={(p) => void openFile(p)}
-          onChange={setContent}
-          onSave={() => void saveFile()}
-          onNewFile={newFile}
-          onRefresh={() => void api.listFiles(nsId).then(setTree)}
-          onRevert={() => {
-            if (selectedPath) void openFile(selectedPath, { force: true })
-          }}
-          onImportFiles={importProjectFiles}
-        />
-      </div>
-
-      <section className="border-2 border-line/70 bg-panel/80 p-4">
-        <h2 className="font-display text-lg font-bold">Live console</h2>
-        <div className="mt-3 min-h-[220px]">
-          <LogConsole
-            namespaceId={nsId}
-            runId={activeRunId}
-            run={activeRun}
-            fill
-            onLogLine={onLogLine}
-          />
+          <Link to={`/namespaces/${nsId}`} className="btn-secondary btn-compact">
+            Namespace
+          </Link>
+          <button type="button" className="btn-secondary btn-compact" onClick={() => void saveAsTemplate()}>
+            Save template
+          </button>
         </div>
-      </section>
+
+        {error && (
+          <p className="border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
+        )}
+        {note && (
+          <p className="border border-moss/40 bg-moss/10 px-3 py-2 text-sm text-ink">{note}</p>
+        )}
+        {providerWarning.length > 0 && (
+          <p className="border border-warn/50 bg-warn/10 px-3 py-2 text-sm text-ink">
+            Non-local providers ({providerWarning.join(', ')}). Starters stay on local/random.
+          </p>
+        )}
+
+        <UnderTheHood step={hoodStep} />
+
+        <VerticalSplit
+          storageKey="tf-pg-vsplit"
+          initial={440}
+          min={220}
+          max={900}
+          className="min-h-[30rem] flex-1"
+          handleLabel="Drag to resize CLI height"
+          first={
+            <HorizontalSplit
+              storageKey="tf-pg-hsplit"
+              initial={58}
+              min={32}
+              max={78}
+              className="h-full min-h-[16rem]"
+              handleLabel="Drag to resize CLI width"
+              first={
+                <TerraformCLI
+                  namespaceId={nsId}
+                  runId={activeRunId}
+                  run={activeRun}
+                  busy={runBusy}
+                  dirty={dirty}
+                  onRun={(type, command) => triggerRun(type, command)}
+                  onLogLine={onLogLine}
+                />
+              }
+              second={
+                <DeployMap
+                  graph={graph}
+                  loading={graphBusy}
+                  deployStates={deployStates}
+                  run={activeRun}
+                  onRefresh={() => void refreshGraph()}
+                  compact
+                />
+              }
+            />
+          }
+          second={
+            <div className="playground-editor flex h-full min-h-[12rem] flex-col border-2 border-line/70 bg-panel/50">
+              <CodeEditor
+                tree={tree}
+                selectedPath={selectedPath}
+                content={content}
+                dirty={dirty}
+                saving={saving}
+                importBusy={importBusy}
+                onSelect={(p) => void openFile(p)}
+                onChange={setContent}
+                onSave={() => void saveFile()}
+                onNewFile={newFile}
+                onRefresh={() => void api.listFiles(nsId).then(setTree)}
+                onRevert={() => {
+                  if (selectedPath) void openFile(selectedPath, { force: true })
+                }}
+                onImportFiles={importProjectFiles}
+              />
+            </div>
+          }
+        />
+      </div>
     </AppShell>
   )
 }

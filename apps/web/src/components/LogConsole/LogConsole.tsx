@@ -7,6 +7,8 @@ type Props = {
   runId: string | null
   run?: Run | null
   fill?: boolean
+  /** Shorter console for dense Playground layout */
+  compact?: boolean
   onLogLine?: (line: string) => void
 }
 
@@ -29,7 +31,7 @@ function formatElapsed(ms: number): string {
   return `${m}m ${rem.toString().padStart(2, '0')}s`
 }
 
-export function LogConsole({ namespaceId, runId, run, fill, onLogLine }: Props) {
+export function LogConsole({ namespaceId, runId, run, fill, compact, onLogLine }: Props) {
   const [lines, setLines] = useState<string[]>([])
   const [status, setStatus] = useState<string>('')
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -118,18 +120,30 @@ export function LogConsole({ namespaceId, runId, run, fill, onLogLine }: Props) 
           : run?.status === 'failed'
             ? 'border-danger'
             : 'border-line/70'
-      } ${fill ? 'min-h-[min(72dvh,52rem)] flex-1' : 'min-h-72'}`}
+      } ${
+        compact
+          ? 'h-full min-h-[8rem]'
+          : fill
+            ? 'min-h-[min(72dvh,52rem)] flex-1'
+            : 'min-h-72'
+      }`}
     >
       {live && (
-        <div className="run-live-banner flex flex-wrap items-center gap-3 px-4 py-3 text-base font-bold tracking-wide text-[#1f2a33]">
+        <div
+          className={`run-live-banner flex flex-wrap items-center gap-2 px-3 font-bold tracking-wide text-[#1f2a33] ${
+            compact ? 'py-1.5 text-xs' : 'gap-3 px-4 py-3 text-base'
+          }`}
+        >
           <span className="run-live-dot" aria-hidden />
-          <span className="uppercase">
-            Terraform {runType} in progress
+          <span className="uppercase">Terraform {runType} in progress</span>
+          <span className={`font-mono font-semibold opacity-90 ${compact ? 'text-[0.65rem]' : 'text-sm'}`}>
+            {elapsed ?? '…'} · {lines.length} lines
           </span>
-          <span className="font-mono text-sm font-semibold opacity-90">
-            {elapsed ?? '…'} · {lines.length} lines · {status || run?.status || 'starting'}
-          </span>
-          <span className="ml-auto text-sm font-semibold uppercase opacity-80">Do not leave — output streaming</span>
+          {!compact && (
+            <span className="ml-auto text-sm font-semibold uppercase opacity-80">
+              Do not leave — output streaming
+            </span>
+          )}
         </div>
       )}
 
@@ -150,7 +164,7 @@ export function LogConsole({ namespaceId, runId, run, fill, onLogLine }: Props) 
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-base">
+      <div className={`flex items-center justify-between gap-3 border-b border-white/10 text-base ${compact ? 'px-3 py-1.5' : 'px-4 py-2'}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-bold tracking-wide uppercase text-[#a8b8c6]">Console</span>
           {runId && (
@@ -180,7 +194,9 @@ export function LogConsole({ namespaceId, runId, run, fill, onLogLine }: Props) 
 
       <pre
         ref={preRef}
-        className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[0.95rem] leading-relaxed text-[#d8e1e9]"
+        className={`min-h-0 flex-1 overflow-auto font-mono leading-relaxed text-[#d8e1e9] ${
+          compact ? 'p-2 text-xs' : 'p-4 text-[0.95rem]'
+        }`}
         onScroll={(e) => {
           const el = e.currentTarget
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
@@ -188,7 +204,7 @@ export function LogConsole({ namespaceId, runId, run, fill, onLogLine }: Props) 
         }}
       >
         {!runId ? (
-          <span className="text-[#7a8b9a]">Select a run or start Init / Plan / Apply / Destroy.</span>
+          <span className="text-[#7a8b9a]">Type a Terraform CLI command above (e.g. terraform plan).</span>
         ) : lines.length === 0 ? (
           <span className={`inline-flex items-center gap-2 ${live ? 'text-warn' : 'text-[#7a8b9a]'}`}>
             {live && <span className="run-live-dot" aria-hidden />}
