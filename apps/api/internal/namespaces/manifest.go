@@ -101,6 +101,32 @@ func (s *Service) ConfigManifest(nsID string) (ConfigManifest, error) {
 	}, nil
 }
 
+// HasTerraformConfig reports whether the namespace repo holds any .tf file.
+// Namespaces connected only through the HTTP backend keep their config on the
+// developer's machine, so scheduled work like drift has nothing to plan against.
+func (s *Service) HasTerraformConfig(nsID string) bool {
+	root := s.repoPath(nsID)
+	found := false
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if importSkipDir[name] || name == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".tf") || strings.HasSuffix(d.Name(), ".tf.json") {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
 // ExportTarGz packs tracked config files for terraforge pull.
 func (s *Service) ExportTarGz(nsID string) ([]byte, ConfigManifest, error) {
 	manifest, err := s.ConfigManifest(nsID)

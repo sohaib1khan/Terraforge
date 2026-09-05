@@ -121,6 +121,8 @@ type connectFiles struct {
 	BackendHCL    string
 	ConfigYAML    string
 	ConnectMD     string
+	SyncSH        string
+	PullSH        string
 	BackendID     string
 	CLIID         string
 	Expires       time.Time
@@ -164,6 +166,9 @@ token: %s
 namespace_id: %s
 `, apiBase, cli.Token, nsID.String())
 
+	syncSH := syncScript(cli.Token, apiBase, nsID.String())
+	pullSH := pullScript(cli.Token, apiBase, nsID.String())
+
 	connectMD := fmt.Sprintf(`# Terraforge connect
 
 API: %s
@@ -189,12 +194,19 @@ CLI token expires: %s
 
 ## Keep local ↔ dashboard in sync
 
-    terraforge status          # checklist + digests
-    terraforge sync            # push local → Terraforge
-    terraforge pull            # pull Terraforge → local
-    terraforge watch           # auto bi-directional (leave running)
+The HTTP backend only syncs *state*. Your .tf files stay on this machine unless
+you push them, and the dashboard's config map, in-app runs and drift checks all
+read the pushed copy. No extra tooling needed:
 
-When you edit in the web UI, watch pulls changes to this folder automatically.
+    sh terraforge_connect/sync.sh    # push local .tf → Terraforge
+    sh terraforge_connect/pull.sh    # pull Terraforge → local (overwrites)
+
+Run sync.sh again after editing locally. State files are never uploaded.
+
+## Companion CLI extras (optional)
+
+    terraforge status          # checklist + digests
+    terraforge watch           # auto bi-directional (leave running)
 `, apiBase, nsID.String(), cli.ExpiresAt.UTC().Format(time.RFC3339))
 
 	return connectFiles{
@@ -204,10 +216,56 @@ When you edit in the web UI, watch pulls changes to this folder automatically.
 		BackendHCL:    backendHCL,
 		ConfigYAML:    configYAML,
 		ConnectMD:     connectMD,
+		SyncSH:        syncSH,
+		PullSH:        pullSH,
 		BackendID:     backend.ID.String(),
 		CLIID:         cli.ID.String(),
 		Expires:       cli.ExpiresAt,
 	}, nil
+}
+
+// syncScript pushes local config up. The HTTP backend only carries state, so
+// without this the dashboard's config map, in-app runs and drift checks stay
+// empty even though state is flowing. Kept as plain sh + curl so it works with
+// no Go toolchain installed.
+func syncScript(token, apiBase, nsID string) string {
+	return fmt.Sprintf(`#!/bin/sh
+# Push this project's Terraform config to Terraforge.
+# The dashboard then shows the same files you edit locally.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+tar czf - \
+  --exclude=./.git \
+  --exclude=./.terraform \
+  --exclude=./terraforge_connect \
+  --exclude='*.tfstate' \
+  --exclude='*.tfstate.backup' \
+  . | curl -fsS -X POST \
+    -H "Authorization: Bearer %s" \
+    -H 'Content-Type: application/gzip' \
+    --data-binary @- \
+    "%s/api/namespaces/%s/import?message=sync+from+local"
+echo
+echo "==> pushed local config to Terraforge"
+`, token, strings.TrimRight(apiBase, "/"), nsID)
+}
+
+// pullScript brings dashboard edits back down into the working directory.
+func pullScript(token, apiBase, nsID string) string {
+	return fmt.Sprintf(`#!/bin/sh
+# Pull Terraform config from Terraforge into this folder.
+# Overwrites local files with the dashboard's copy — commit or stash first.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+tmp=$(mktemp)
+curl -fsS -H "Authorization: Bearer %s" \
+  "%s/api/namespaces/%s/config-export" -o "$tmp"
+tar xzf "$tmp"
+rm -f "$tmp"
+echo "==> pulled Terraforge config into $root"
+`, token, strings.TrimRight(apiBase, "/"), nsID)
 }
 
 func buildInstallShell(p connectFiles) string {
@@ -221,11 +279,20 @@ func buildInstallShell(p connectFiles) string {
 	writeHeredoc(&b, "terraforge_connect/backend.hcl", "TERRAFORGE_BACKEND_EOF", p.BackendHCL)
 	writeHeredoc(&b, "terraforge_connect/config.yaml", "TERRAFORGE_CONFIG_EOF", p.ConfigYAML)
 	writeHeredoc(&b, "terraforge_connect/README.md", "TERRAFORGE_MD_EOF", p.ConnectMD)
+	writeHeredoc(&b, "terraforge_connect/sync.sh", "TERRAFORGE_SYNC_EOF", p.SyncSH)
+	writeHeredoc(&b, "terraforge_connect/pull.sh", "TERRAFORGE_PULL_EOF", p.PullSH)
 	b.WriteString("printf '*\\n' > terraforge_connect/.gitignore\n")
 	b.WriteString("chmod 600 terraforge_connect/backend.hcl terraforge_connect/config.yaml\n")
+	b.WriteString("chmod 700 terraforge_connect/sync.sh terraforge_connect/pull.sh\n")
+	// State travels over the backend; config only arrives if we push it, so do
+	// that once now to leave the dashboard mirroring the project immediately.
+	b.WriteString("echo '==> Pushing this project'\\''s .tf files so the dashboard mirrors it'\n")
+	b.WriteString("sh terraforge_connect/sync.sh || echo '==> Config push skipped (no .tf files yet, or API unreachable)'\n")
 	b.WriteString("echo '==> Done. Next:'\n")
 	b.WriteString("echo '    terraform init -reconfigure -backend-config=terraforge_connect/backend.hcl'\n")
 	b.WriteString("echo '    terraform plan'\n")
+	b.WriteString("echo '==> After editing .tf files locally, re-sync the dashboard:'\n")
+	b.WriteString("echo '    sh terraforge_connect/sync.sh'\n")
 	b.WriteString("echo '==> Disconnect later:'\n")
 	b.WriteString("echo '    rm -rf terraforge_connect terraforge_connect.tf'\n")
 	b.WriteString("echo \"==> API: " + shellSingleQuote(p.APIBase) + "\"\n")

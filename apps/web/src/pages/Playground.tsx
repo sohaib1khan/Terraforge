@@ -19,7 +19,12 @@ import {
   parsePlanResources,
   type NodeDeployState,
 } from '../components/Playground/DeployMap'
-import { HorizontalSplit, VerticalSplit } from '../components/Playground/ResizableLayout'
+import { VerticalSplit } from '../components/Playground/ResizableLayout'
+import {
+  EmptyWorkspaceCard,
+  NewFileDialog,
+  SaveTemplateDialog,
+} from '../components/Playground/StarterFiles'
 import { TerraformCLI } from '../components/Playground/TerraformCLI'
 import {
   detectNonLocalProviders,
@@ -27,6 +32,7 @@ import {
   templateFilesMap,
   type TfTemplate,
 } from '../lib/templates'
+import { RUNNABLE_SET, scaffoldFiles, type Scaffold } from '../lib/tfScaffolds'
 
 type HoodStep = 'idle' | 'queue' | 'lock' | 'runner' | 'state'
 
@@ -104,10 +110,18 @@ export function Playground() {
   const [error, setError] = useState('')
   const [note, setNote] = useState('')
   const [busyStart, setBusyStart] = useState(false)
+  const [newFileOpen, setNewFileOpen] = useState(false)
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [scaffoldBusy, setScaffoldBusy] = useState(false)
+  const [editRequest, setEditRequest] = useState(0)
 
   const dirty = content !== savedContent
   const activeRun = runs.find((r) => r.id === activeRunId) ?? null
   const hoodStep = hoodFromRun(activeRun)
+
+  const filePaths = useMemo(() => collectFilePaths(tree?.children ?? []), [tree])
+  const tfFileCount = filePaths.filter((p) => p.endsWith('.tf')).length
 
   const refreshTemplates = useCallback(async () => {
     const res = await api.listPlaygroundTemplates()
@@ -288,12 +302,50 @@ export function Playground() {
   }
 
   function newFile() {
-    const path = prompt('New file path (e.g. main.tf)')
-    if (!path) return
     if (dirty && !confirm('Discard unsaved changes?')) return
-    setSelectedPath(path)
-    setContent('')
-    setSavedContent('__new__')
+    setNewFileOpen(true)
+  }
+
+  /** Write a file to the session immediately so it can be run right away. */
+  async function createFile(path: string, fileContent: string) {
+    if (!nsId) return
+    setScaffoldBusy(true)
+    setError('')
+    try {
+      await api.writeFile(nsId, path, fileContent, `Add ${path}`)
+      setTree(await api.listFiles(nsId))
+      await openFile(path, { force: true })
+      setEditRequest((n) => n + 1)
+      void refreshGraph()
+      setNote(`Created ${path}. Run terraform init, then plan.`)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Could not create ${path}`)
+    } finally {
+      setScaffoldBusy(false)
+    }
+  }
+
+  async function addScaffold(s: Scaffold) {
+    await createFile(s.path, s.content)
+  }
+
+  async function seedRunnableStarter() {
+    if (!nsId) return
+    setScaffoldBusy(true)
+    setError('')
+    try {
+      const files = scaffoldFiles(RUNNABLE_SET)
+      await api.importFiles(nsId, files, 'Add runnable starter files')
+      setTree(await api.listFiles(nsId))
+      setProviderWarning(detectNonLocalProviders(files))
+      await openFile('main.tf', { force: true })
+      void refreshGraph()
+      setNote('Starter files added. Run terraform init → plan → apply.')
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not add starter files')
+    } finally {
+      setScaffoldBusy(false)
+    }
   }
 
   async function triggerRun(type: RunType, command?: string) {
@@ -324,7 +376,7 @@ export function Playground() {
     setDeployStates((prev) => applyLogLineToDeploy(prev, line))
   }
 
-  async function startBlank() {
+  async function startBlank(opts?: { seed?: boolean }) {
     setBusyStart(true)
     setError('')
     try {
@@ -335,9 +387,16 @@ export function Playground() {
         slug: `pg-${stamp}`,
         is_playground: true,
       })
+      if (opts?.seed) {
+        await api.importFiles(created.id, scaffoldFiles(RUNNABLE_SET), 'Add runnable starter files')
+      }
       setSearchParams({ ns: created.id })
       await refreshRecent()
-      setNote('Blank playground ready — add .tf files or import a starter.')
+      setNote(
+        opts?.seed
+          ? 'Playground ready with starter files — run terraform init → plan → apply.'
+          : 'Blank playground ready — create your first .tf file to start.',
+      )
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create playground')
     } finally {
@@ -384,17 +443,19 @@ export function Playground() {
     }
   }
 
-  async function saveAsTemplate() {
+  async function saveAsTemplate(name: string, description: string) {
     if (!nsId) return
-    const name = prompt('Template name', ns?.name ?? 'My playground')
-    if (!name) return
-    const description = prompt('Short description (optional)', '') ?? ''
+    setSavingTemplate(true)
+    setError('')
     try {
       await api.savePlaygroundFromNamespace(nsId, { name, description })
       await refreshTemplates()
-      setNote(`Saved playground template “${name}”.`)
+      setSaveOpen(false)
+      setNote(`Saved “${name}” — relaunch it any time from the Playground start screen.`)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Save template failed')
+    } finally {
+      setSavingTemplate(false)
     }
   }
 
@@ -439,10 +500,25 @@ export function Playground() {
               disabled={busyStart}
               onClick={() => void startBlank()}
               className="btn-secondary"
+              title="Empty workspace — you create the .tf files"
             >
               Blank playground
             </button>
+            <button
+              type="button"
+              disabled={busyStart}
+              onClick={() => void startBlank({ seed: true })}
+              className="btn-secondary"
+              title="Blank workspace pre-filled with versions.tf, main.tf and outputs.tf"
+            >
+              Blank + starter files
+            </button>
           </div>
+          <p className="text-sm text-ink-muted">
+            Anything you build in a playground can be saved as a reusable template with{' '}
+            <strong className="font-semibold text-ink">Save playground</strong>, then relaunched here for
+            a demo later.
+          </p>
         </section>
 
         <section className="mb-8">
@@ -541,9 +617,20 @@ export function Playground() {
           <Link to={`/namespaces/${nsId}`} className="btn-secondary btn-compact">
             Namespace
           </Link>
-          <button type="button" className="btn-secondary btn-compact" onClick={() => void saveAsTemplate()}>
-            Save template
+          <button type="button" className="btn-secondary btn-compact" onClick={newFile}>
+            New file
           </button>
+          <button
+            type="button"
+            className="btn-secondary btn-compact"
+            onClick={() => setSaveOpen(true)}
+            title="Save these files as a reusable playground template"
+          >
+            Save playground
+          </button>
+          <span className="font-mono text-xs text-ink-muted">
+            {tfFileCount} .tf file{tfFileCount === 1 ? '' : 's'}
+          </span>
         </div>
 
         {error && (
@@ -558,23 +645,42 @@ export function Playground() {
           </p>
         )}
 
+        {tree && tfFileCount === 0 && (
+          <EmptyWorkspaceCard
+            busy={scaffoldBusy}
+            onSeedRunnable={() => void seedRunnableStarter()}
+            onAddScaffold={(s) => void addScaffold(s)}
+            onNewFile={newFile}
+          />
+        )}
+
         <UnderTheHood step={hoodStep} />
 
         <VerticalSplit
-          storageKey="tf-pg-vsplit"
-          initial={440}
-          min={220}
-          max={900}
-          className="min-h-[30rem] flex-1"
-          handleLabel="Drag to resize CLI height"
+          storageKey="tf-pg-vsplit-deploy"
+          initial={430}
+          min={200}
+          max={1000}
+          className="min-h-[34rem] flex-1"
+          handleLabel="Drag to resize the deploy dashboard"
           first={
-            <HorizontalSplit
-              storageKey="tf-pg-hsplit"
-              initial={58}
-              min={32}
-              max={78}
-              className="h-full min-h-[16rem]"
-              handleLabel="Drag to resize CLI width"
+            <DeployMap
+              graph={graph}
+              loading={graphBusy}
+              deployStates={deployStates}
+              run={activeRun}
+              onRefresh={() => void refreshGraph()}
+            />
+          }
+          second={
+            <VerticalSplit
+              storageKey="tf-pg-vsplit"
+              initial={340}
+              min={160}
+              max={900}
+              className="playground-vsplit-tight h-full min-h-0"
+              secondMin="8rem"
+              handleLabel="Drag to resize CLI height"
               first={
                 <TerraformCLI
                   namespaceId={nsId}
@@ -587,40 +693,52 @@ export function Playground() {
                 />
               }
               second={
-                <DeployMap
-                  graph={graph}
-                  loading={graphBusy}
-                  deployStates={deployStates}
-                  run={activeRun}
-                  onRefresh={() => void refreshGraph()}
-                  compact
-                />
+                <div className="playground-editor flex h-full min-h-[8rem] flex-col border-2 border-line/70 bg-panel/50">
+                  <CodeEditor
+                    tree={tree}
+                    selectedPath={selectedPath}
+                    content={content}
+                    dirty={dirty}
+                    saving={saving}
+                    importBusy={importBusy}
+                    onSelect={(p) => void openFile(p)}
+                    onChange={setContent}
+                    onSave={() => void saveFile()}
+                    onNewFile={newFile}
+                    onRefresh={() => void api.listFiles(nsId).then(setTree)}
+                    onRevert={() => {
+                      if (selectedPath) void openFile(selectedPath, { force: true })
+                    }}
+                    onImportFiles={importProjectFiles}
+                    editRequest={editRequest}
+                  />
+                </div>
               }
             />
           }
-          second={
-            <div className="playground-editor flex h-full min-h-[12rem] flex-col border-2 border-line/70 bg-panel/50">
-              <CodeEditor
-                tree={tree}
-                selectedPath={selectedPath}
-                content={content}
-                dirty={dirty}
-                saving={saving}
-                importBusy={importBusy}
-                onSelect={(p) => void openFile(p)}
-                onChange={setContent}
-                onSave={() => void saveFile()}
-                onNewFile={newFile}
-                onRefresh={() => void api.listFiles(nsId).then(setTree)}
-                onRevert={() => {
-                  if (selectedPath) void openFile(selectedPath, { force: true })
-                }}
-                onImportFiles={importProjectFiles}
-              />
-            </div>
-          }
         />
       </div>
+
+      {newFileOpen && (
+        <NewFileDialog
+          existingPaths={filePaths}
+          onClose={() => setNewFileOpen(false)}
+          onCreate={(path, fileContent) => {
+            setNewFileOpen(false)
+            void createFile(path, fileContent)
+          }}
+        />
+      )}
+
+      {saveOpen && (
+        <SaveTemplateDialog
+          defaultName={ns?.name ?? 'My playground'}
+          files={filePaths}
+          saving={savingTemplate}
+          onClose={() => setSaveOpen(false)}
+          onSave={(name, description) => void saveAsTemplate(name, description)}
+        />
+      )}
     </AppShell>
   )
 }

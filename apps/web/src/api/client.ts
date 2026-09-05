@@ -8,6 +8,7 @@ export type User = {
 
 export type StateView = {
   exists: boolean
+  connected?: boolean
   updated_at?: string | null
   terraform_version?: string
   serial?: number
@@ -403,7 +404,13 @@ export const api = {
   getNamespace: (id: string) => request<Namespace>(`/api/namespaces/${id}`),
   updateNamespaceSettings: (
     id: string,
-    body: { require_approval?: boolean; drift_interval_minutes?: number | null },
+    body: {
+      name?: string
+      terraform_version?: string
+      require_approval?: boolean
+      drift_interval_minutes?: number | null
+      is_playground?: boolean
+    },
   ) =>
     request<Namespace>(`/api/namespaces/${id}`, {
       method: 'PATCH',

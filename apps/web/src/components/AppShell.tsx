@@ -44,6 +44,9 @@ export function AppShell({
           <NavLink to="/" end className={linkClass}>
             Dashboard
           </NavLink>
+          <NavLink to="/namespaces" className={linkClass}>
+            Namespaces
+          </NavLink>
           <NavLink to="/templates" className={linkClass}>
             Templates
           </NavLink>

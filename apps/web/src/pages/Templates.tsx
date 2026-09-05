@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError, type Namespace } from '../api/client'
 import { AppShell } from '../components/AppShell'
+import { CopyButton } from '../components/CopyButton'
 import { EnvIcon } from '../components/EnvironmentPanel/envVisuals'
+import { copyText } from '../lib/clipboard'
 import {
   nextTemplate,
   previousTemplate,
@@ -42,25 +44,17 @@ const FILTERS: Array<{ id: 'all' | TemplateTrack; label: string }> = [
 ]
 
 function FilePreview({ path, content }: { path: string; content: string }) {
-  const [copied, setCopied] = useState(false)
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(content)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* ignore */
-    }
-  }
+  const preRef = useRef<HTMLPreElement>(null)
   return (
     <div className="border border-line bg-panel/90">
       <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
         <p className="font-mono text-sm font-medium text-ink">{path}</p>
-        <button type="button" onClick={() => void copy()} className="btn-secondary btn-compact px-3 text-base">
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <CopyButton text={content} selectRef={preRef} />
       </div>
-      <pre className="max-h-72 overflow-auto bg-ink p-4 font-mono text-sm leading-relaxed text-panel">
+      <pre
+        ref={preRef}
+        className="max-h-72 overflow-auto bg-ink p-4 font-mono text-sm leading-relaxed text-panel"
+      >
         {content}
       </pre>
     </div>
@@ -148,11 +142,12 @@ export function Templates() {
   async function copyAll() {
     if (!selected) return
     const blob = selected.files.map((f) => `// ===== ${f.path} =====\n${f.content}`).join('\n\n')
-    try {
-      await navigator.clipboard.writeText(blob)
-      setNote('All template files copied to clipboard.')
-    } catch {
-      setError('Clipboard copy failed')
+    setError('')
+    setNote('')
+    if (await copyText(blob)) {
+      setNote(`Copied ${selected.files.length} template files to the clipboard.`)
+    } else {
+      setError('Clipboard blocked by the browser — use the Copy button on an individual file instead.')
     }
   }
 

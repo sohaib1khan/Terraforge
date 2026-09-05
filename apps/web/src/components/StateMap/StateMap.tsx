@@ -295,7 +295,7 @@ export function StateMap({ state, busy, onRefresh }: Props) {
       </div>
 
       {!state.exists ? (
-        <p className="text-base text-ink-muted">No state stored yet for this namespace.</p>
+        <EmptyState state={state} />
       ) : (
         <>
           <div className="flex flex-wrap gap-2 text-sm">
@@ -313,6 +313,13 @@ export function StateMap({ state, busy, onRefresh }: Props) {
               <StatChip label="lineage" value={`${state.lineage.slice(0, 8)}…`} mono />
             )}
           </div>
+
+          {state.resource_count === 0 && (
+            <p className="border-2 border-line/70 bg-paper/60 px-3 py-2 text-base text-ink-muted">
+              State is stored here but holds no resources — everything has been destroyed, or the
+              last apply created nothing.
+            </p>
+          )}
 
           {state.locked && state.lock && (
             <p className="border-2 border-warn/40 bg-warn/10 px-3 py-2 text-base text-ink">
@@ -400,6 +407,36 @@ export function StateMap({ state, busy, onRefresh }: Props) {
         </>
       )}
     </section>
+  )
+}
+
+function EmptyState({ state }: { state: StateView }) {
+  const lastContact = state.updated_at ? new Date(state.updated_at).toLocaleString() : null
+
+  if (!state.connected) {
+    return (
+      <div className="space-y-2 border-2 border-dashed border-line/70 bg-paper/60 px-3 py-3 text-base">
+        <p className="font-bold text-ink">No state stored yet</p>
+        <p className="text-ink-muted">
+          Nothing has talked to this namespace’s backend so far. Use{' '}
+          <span className="font-semibold text-ink">Local connect &amp; tokens</span> below to point
+          your local Terraform here, or run an apply from the Terraform lifecycle panel on this page.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2 border-2 border-moss/40 bg-moss/10 px-3 py-3 text-base">
+      <p className="font-bold text-ink">Connected — waiting for your first apply</p>
+      <p className="text-ink-muted">
+        Terraform has reached this backend{lastContact ? ` (last contact ${lastContact})` : ''}, so
+        the connection is working. No state has been uploaded yet:{' '}
+        <span className="font-mono text-sm text-ink">terraform plan</span> only reads state and takes
+        a lock, while <span className="font-mono text-sm text-ink">terraform apply</span> is what
+        pushes it here. Run an apply and your resources will show up in this map.
+      </p>
+    </div>
   )
 }
 

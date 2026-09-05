@@ -176,8 +176,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Namespace, error)
 }
 
 type UpdateSettingsInput struct {
+	// Name is the display name only; slug stays fixed because it is baked into
+	// backend URLs and on-disk repo paths.
+	Name                 *string
+	TerraformVersion     *string
 	RequireApproval      *bool
 	DriftIntervalMinutes *int
+	IsPlayground         *bool
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, id uuid.UUID, in UpdateSettingsInput) (Namespace, error) {
@@ -198,11 +203,30 @@ func (s *Service) UpdateSettings(ctx context.Context, id uuid.UUID, in UpdateSet
 			drift = &v
 		}
 	}
+	playground := ns.IsPlayground
+	if in.IsPlayground != nil {
+		playground = *in.IsPlayground
+	}
+	name := ns.Name
+	if in.Name != nil {
+		name = strings.TrimSpace(*in.Name)
+		if err := validateName(name); err != nil {
+			return Namespace{}, err
+		}
+	}
+	tfVersion := ns.TerraformVersion
+	if in.TerraformVersion != nil {
+		tfVersion = strings.TrimSpace(*in.TerraformVersion)
+		if err := validateTerraformVersion(tfVersion); err != nil {
+			return Namespace{}, err
+		}
+	}
 	_, err = s.pool.Exec(ctx, `
 		UPDATE namespaces
-		SET require_approval = $2, drift_interval_minutes = $3
+		SET require_approval = $2, drift_interval_minutes = $3, is_playground = $4,
+		    name = $5, terraform_version = $6
 		WHERE id = $1
-	`, id, req, drift)
+	`, id, req, drift, playground, name, tfVersion)
 	if err != nil {
 		return Namespace{}, err
 	}

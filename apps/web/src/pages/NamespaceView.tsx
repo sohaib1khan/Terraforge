@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   api,
   ApiError,
@@ -16,7 +16,9 @@ import {
   type Suggestions,
 } from '../api/client'
 import { AppShell } from '../components/AppShell'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ConnectLocalGuide } from '../components/ConnectLocalGuide'
+import { CopyButton } from '../components/CopyButton'
 import { ConfigMap } from '../components/ConfigMap/ConfigMap'
 import { ConfigSyncPanel } from '../components/ConfigSync/ConfigSyncPanel'
 import { EnvironmentPanel, EnvBadgeRow } from '../components/EnvironmentPanel/EnvironmentPanel'
@@ -32,6 +34,7 @@ import { StatusBadge } from '../components/StatusBadge/StatusBadge'
 
 export function NamespaceView() {
   const { id = '' } = useParams()
+  const navigate = useNavigate()
   const [ns, setNs] = useState<Namespace | null>(null)
   const [tree, setTree] = useState<FileNode | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -46,6 +49,8 @@ export function NamespaceView() {
   const [cliTokens, setCliTokens] = useState<CLIToken[]>([])
   const [newToken, setNewToken] = useState<string | null>(null)
   const [tokenBusy, setTokenBusy] = useState(false)
+  const backendRef = useRef<HTMLPreElement>(null)
+  const [promoteBusy, setPromoteBusy] = useState(false)
   const [remoteURL, setRemoteURL] = useState('')
   const [remotePAT, setRemotePAT] = useState('')
   const [remoteBusy, setRemoteBusy] = useState(false)
@@ -59,6 +64,10 @@ export function NamespaceView() {
   const [webhookBusy, setWebhookBusy] = useState(false)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [driftMinutes, setDriftMinutes] = useState('')
+  const [nameDraft, setNameDraft] = useState('')
+  const [tfDraft, setTfDraft] = useState('')
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [secrets, setSecrets] = useState<NamespaceSecret[]>([])
   const [secretKey, setSecretKey] = useState('')
   const [secretValue, setSecretValue] = useState('')
@@ -103,6 +112,8 @@ export function NamespaceView() {
         api.getGraph(id).catch(() => null),
       ])
     setNs(namespace)
+    setNameDraft(namespace.name)
+    setTfDraft(namespace.terraform_version)
     setDriftMinutes(
       namespace.drift_interval_minutes != null ? String(namespace.drift_interval_minutes) : '',
     )
@@ -350,6 +361,8 @@ export function NamespaceView() {
   }
 
   async function saveSettings(patch: {
+    name?: string
+    terraform_version?: string
     require_approval?: boolean
     drift_interval_minutes?: number | null
   }) {
@@ -358,6 +371,8 @@ export function NamespaceView() {
     try {
       const updated = await api.updateNamespaceSettings(id, patch)
       setNs(updated)
+      setNameDraft(updated.name)
+      setTfDraft(updated.terraform_version)
       setDriftMinutes(
         updated.drift_interval_minutes != null ? String(updated.drift_interval_minutes) : '',
       )
@@ -462,6 +477,33 @@ export function NamespaceView() {
     setGuideOpen(true)
   }
 
+  async function deleteNamespace() {
+    setDeleteBusy(true)
+    setError('')
+    try {
+      await api.deleteNamespace(id)
+      navigate('/namespaces', { replace: true })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete namespace')
+      setDeleteBusy(false)
+      setDeleteOpen(false)
+    }
+  }
+
+  /** Playgrounds are hidden from the Dashboard; clearing the flag surfaces them. */
+  async function promoteToDashboard() {
+    setPromoteBusy(true)
+    setError('')
+    try {
+      const updated = await api.updateNamespaceSettings(id, { is_playground: false })
+      setNs(updated)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not promote this namespace')
+    } finally {
+      setPromoteBusy(false)
+    }
+  }
+
   async function revokeCliToken(tokenId: string) {
     if (!confirm('Revoke this CLI token? Local companion CLI will stop working until you download a new pack.'))
       return
@@ -477,6 +519,15 @@ export function NamespaceView() {
 
   const stateURL = `${window.location.origin}/api/state/${id}`
   const fullWebhookURL = webhookURL ? `${window.location.origin}${webhookURL}` : ''
+  const backendBlock = `terraform {
+  backend "http" {
+    address        = "${stateURL}"
+    lock_address   = "${stateURL}"
+    unlock_address = "${stateURL}"
+    username       = "terraforge"
+    password       = "${newToken ?? ''}"
+  }
+}`
 
   return (
     <AppShell wide>
@@ -668,6 +719,43 @@ export function NamespaceView() {
 
       <section className="mt-8 space-y-3 border border-line bg-panel/80 p-4">
         <h2 className="font-display text-lg font-bold">Namespace settings</h2>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block min-w-[16rem] flex-1 text-sm">
+            <span className="mb-1 block text-ink-muted">Display name</span>
+            <input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              className="w-full border border-line bg-paper px-3 py-2 outline-none ring-ember/30 focus:ring-2"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-ink-muted">Terraform version</span>
+            <input
+              value={tfDraft}
+              onChange={(e) => setTfDraft(e.target.value)}
+              placeholder="1.9.0"
+              className="w-32 border border-line bg-paper px-3 py-2 font-mono outline-none ring-ember/30 focus:ring-2"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={
+              settingsBusy ||
+              !nameDraft.trim() ||
+              (nameDraft.trim() === ns?.name && tfDraft.trim() === ns?.terraform_version)
+            }
+            onClick={() =>
+              void saveSettings({ name: nameDraft.trim(), terraform_version: tfDraft.trim() })
+            }
+            className="border border-line bg-panel px-3 py-2 text-sm hover:bg-paper-deep disabled:opacity-60"
+          >
+            {settingsBusy ? 'Saving…' : 'Save details'}
+          </button>
+        </div>
+        <p className="text-sm text-ink-muted">
+          The slug <span className="font-mono text-ink">{ns?.slug}</span> never changes — it is baked
+          into backend URLs and token config, so renaming is safe for already-connected workspaces.
+        </p>
         <label className="flex items-center gap-2 text-sm text-ink">
           <input
             type="checkbox"
@@ -856,6 +944,29 @@ export function NamespaceView() {
         </ul>
       </section>
 
+      {ns?.is_playground && (
+        <section className="mt-8 border-2 border-ember/40 bg-ember/5 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="font-display text-lg font-bold">This is a playground namespace</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                Playgrounds are hidden from the Dashboard so scratch work stays out of the way. Promote
+                it to track it on the Dashboard alongside your other environments — files, state, runs
+                and tokens all carry over.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={promoteBusy}
+              onClick={() => void promoteToDashboard()}
+              className="shrink-0 bg-moss-deep px-4 py-2 text-sm font-medium text-paper hover:bg-moss disabled:opacity-60"
+            >
+              {promoteBusy ? 'Promoting…' : 'Show on Dashboard'}
+            </button>
+          </div>
+        </section>
+      )}
+
       <section className="mt-8 space-y-3 border border-line bg-panel/80 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -895,17 +1006,32 @@ export function NamespaceView() {
 
         {newToken && (
           <div className="border border-ember/40 bg-paper p-3 text-sm">
-            <p className="font-medium text-ember-deep">Copy now — shown once</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-medium text-ember-deep">Copy now — shown once</p>
+              <CopyButton
+                text={newToken}
+                label="Copy token"
+                className="btn-secondary btn-compact px-3 text-sm"
+              />
+            </div>
             <code className="mt-2 block break-all text-xs">{newToken}</code>
-            <pre className="mt-3 overflow-auto bg-[#2f3d4a] p-3 font-mono text-sm text-[#d8e1e9]">{`terraform {
-  backend "http" {
-    address        = "${stateURL}"
-    lock_address   = "${stateURL}"
-    unlock_address = "${stateURL}"
-    username       = "terraforge"
-    password       = "${newToken}"
-  }
-}`}</pre>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-ink-muted">
+                backend block
+              </p>
+              <CopyButton
+                text={backendBlock}
+                label="Copy block"
+                selectRef={backendRef}
+                className="btn-secondary btn-compact px-3 text-sm"
+              />
+            </div>
+            <pre
+              ref={backendRef}
+              className="mt-2 overflow-auto bg-[#2f3d4a] p-3 font-mono text-sm text-[#d8e1e9]"
+            >
+              {backendBlock}
+            </pre>
           </div>
         )}
 
@@ -968,9 +1094,9 @@ export function NamespaceView() {
       </section>
 
       <section className="mt-8 space-y-3 border border-line bg-panel/80 p-4">
-        <h2 className="font-display text-lg font-bold">Git remote</h2>
         {ns?.has_remote && ns.remote_url ? (
           <>
+            <h2 className="font-display text-lg font-bold">Git remote</h2>
             <p className="truncate text-sm text-ink-muted">{ns.remote_url}</p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -1007,9 +1133,19 @@ export function NamespaceView() {
             />
           </>
         ) : (
-          <div className="space-y-3">
+          <details className="group">
+            <summary className="cursor-pointer font-display text-lg font-bold marker:text-ink-muted">
+              Git remote{' '}
+              <span className="font-sans text-sm font-normal text-ink-muted">
+                — optional, not needed for local Terraform
+              </span>
+            </summary>
+            <div className="mt-3 space-y-3">
             <p className="text-sm text-ink-muted">
-              Connect this local namespace to GitHub / GitLab / Gitea.
+              Only useful if you want Terraforge to mirror this namespace’s files to a hosted repo
+              (GitHub / GitLab / Gitea) — for example to review config in pull requests. Connecting
+              your local Terraform does not need this: the backend carries state, and{' '}
+              <span className="font-mono text-xs">terraforge_connect/sync.sh</span> carries config.
             </p>
             <input
               value={remoteURL}
@@ -1032,9 +1168,53 @@ export function NamespaceView() {
             >
               {remoteBusy ? 'Connecting…' : 'Connect & push'}
             </button>
-          </div>
+            </div>
+          </details>
         )}
       </section>
+
+      <section className="mt-8 border-2 border-danger/40 bg-danger/5 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="font-display text-lg font-bold text-danger">Danger zone</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              Deleting removes this namespace’s files, state, runs, members and tokens for good. Any
+              real infrastructure it tracked keeps running — destroy it first if you want it gone.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDeleteOpen(true)}
+            className="shrink-0 bg-danger px-4 py-2 text-sm font-medium text-paper hover:opacity-90"
+          >
+            Delete namespace
+          </button>
+        </div>
+      </section>
+
+      {deleteOpen && ns && (
+        <ConfirmDialog
+          title={`Delete “${ns.name}”?`}
+          busy={deleteBusy}
+          requireText={ns.name}
+          confirmLabel="Delete namespace"
+          message={
+            <>
+              <p>
+                This permanently removes the namespace, its Terraform files, stored state, run
+                history, members and backend tokens. It cannot be undone.
+              </p>
+              <p>
+                Real infrastructure is <span className="font-bold text-ink">not</span> destroyed —
+                run <span className="font-mono text-sm text-ink">terraform destroy</span> first if
+                you want the resources gone too, otherwise they keep running untracked.
+              </p>
+            </>
+          }
+          onCancel={() => setDeleteOpen(false)}
+          onConfirm={() => void deleteNamespace()}
+        />
+      )}
 
       <ConnectLocalGuide
         open={guideOpen}

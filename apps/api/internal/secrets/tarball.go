@@ -13,6 +13,8 @@ func connectPackFileMap(p connectFiles) map[string]string {
 		"terraforge_connect/backend.hcl":    p.BackendHCL,
 		"terraforge_connect/config.yaml":    p.ConfigYAML,
 		"terraforge_connect/README.md":      p.ConnectMD,
+		"terraforge_connect/sync.sh":        p.SyncSH,
+		"terraforge_connect/pull.sh":        p.PullSH,
 		"terraforge_connect/.gitignore":     "*\n",
 	}
 }
@@ -27,8 +29,11 @@ func packTarGz(p connectFiles) ([]byte, error) {
 	for name, body := range files {
 		bodyBytes := []byte(body)
 		mode := int64(0o600)
-		if name == "terraforge_connect.tf" || name == "terraforge_connect/README.md" {
+		switch name {
+		case "terraforge_connect.tf", "terraforge_connect/README.md":
 			mode = 0o644
+		case "terraforge_connect/sync.sh", "terraforge_connect/pull.sh":
+			mode = 0o700
 		}
 		hdr := &tar.Header{
 			Name:    name,

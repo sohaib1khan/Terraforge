@@ -9,7 +9,11 @@ import (
 )
 
 type View struct {
-	Exists           bool           `json:"exists"`
+	Exists bool `json:"exists"`
+	// Connected is true once Terraform has talked to this backend at all — a
+	// lock/unlock cycle creates the row, so `plan` alone flips this without
+	// ever uploading state.
+	Connected        bool           `json:"connected"`
 	UpdatedAt        *time.Time     `json:"updated_at,omitempty"`
 	TerraformVersion string         `json:"terraform_version,omitempty"`
 	Serial           int64          `json:"serial,omitempty"`
@@ -51,6 +55,7 @@ type ViewOutput struct {
 func BuildView(state []byte, updatedAt *time.Time, lock *LockInfo) View {
 	v := View{
 		Exists:    len(state) > 0,
+		Connected: len(state) > 0 || updatedAt != nil || lock != nil,
 		UpdatedAt: updatedAt,
 		Resources: []ViewResource{},
 		Outputs:   []ViewOutput{},

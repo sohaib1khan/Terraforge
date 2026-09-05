@@ -1,5 +1,5 @@
 import Editor from '@monaco-editor/react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FileNode } from '../../api/client'
 import { collectFilePaths, FileTree } from './FileTree'
 import { languageForPath, registerHCL } from './hclMonaco'
@@ -20,6 +20,8 @@ type Props = {
   onRefresh?: () => void
   onRevert?: () => void
   onImportFiles?: (files: Record<string, string>) => Promise<void>
+  /** Bump this to jump into edit mode, e.g. right after creating a file. */
+  editRequest?: number
 }
 
 function isSeedOnly(paths: string[]): boolean {
@@ -41,8 +43,13 @@ export function CodeEditor({
   onRefresh,
   onRevert,
   onImportFiles,
+  editRequest = 0,
 }: Props) {
   const [mode, setMode] = useState<Mode>('inspect')
+
+  useEffect(() => {
+    if (editRequest > 0) setMode('edit')
+  }, [editRequest])
   const dirInputRef = useRef<HTMLInputElement>(null)
   const language = languageForPath(selectedPath)
   const readOnly = mode === 'inspect'

@@ -9,6 +9,7 @@ import {
   type Suggestions,
 } from '../api/client'
 import { AppShell } from '../components/AppShell'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { EnvBadge, EnvBadgeRow, EnvIcon } from '../components/EnvironmentPanel/envVisuals'
 import { RunStatusBadge, StatusBadge } from '../components/StatusBadge/StatusBadge'
 
@@ -69,12 +70,19 @@ export function Dashboard() {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [playgroundCount, setPlaygroundCount] = useState(0)
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const load = useCallback(async (opts?: { soft?: boolean }) => {
     if (opts?.soft) setRefreshing(true)
     else setLoading(true)
     try {
       const res = await api.listNamespaces({ playground: false })
+      void api
+        .listNamespaces({ playground: true })
+        .then((r) => setPlaygroundCount(r.namespaces.length))
+        .catch(() => setPlaygroundCount(0))
       const rows = await Promise.all(
         res.namespaces.map(async (ns) => {
           const [graph, runs, suggestions] = await Promise.all([
@@ -244,13 +252,17 @@ export function Dashboard() {
     }
   }
 
-  async function removeNamespace(id: string, label: string) {
-    if (!confirm(`Delete namespace "${label}"? This cannot be undone.`)) return
+  async function removeNamespace() {
+    if (!pendingDelete) return
+    setDeleteBusy(true)
     try {
-      await api.deleteNamespace(id)
-      setPulses((prev) => prev.filter((p) => p.ns.id !== id))
+      await api.deleteNamespace(pendingDelete.id)
+      setPulses((prev) => prev.filter((p) => p.ns.id !== pendingDelete.id))
+      setPendingDelete(null)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Delete failed')
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -476,6 +488,18 @@ export function Dashboard() {
               )}
             </form>
 
+            {playgroundCount > 0 && (
+              <p className="surface mb-4 px-4 py-3 text-base text-ink-muted">
+                {playgroundCount} playground workspace{playgroundCount === 1 ? '' : 's'} are hidden from
+                this list.{' '}
+                <Link to="/playground" className="font-semibold text-ember-deep underline">
+                  Open the Playground
+                </Link>{' '}
+                to work in one, then use <strong className="text-ink">Show on Dashboard</strong> on its
+                namespace page to track it here.
+              </p>
+            )}
+
             {pulses.length === 0 ? (
               <p className="surface border-dashed px-4 py-10 text-center text-lg text-ink-muted">
                 No namespaces yet. Create one to open the editor.
@@ -524,7 +548,7 @@ export function Dashboard() {
                         <StatusBadge status={ns.status} />
                         <button
                           type="button"
-                          onClick={() => void removeNamespace(ns.id, ns.name)}
+                          onClick={() => setPendingDelete({ id: ns.id, name: ns.name })}
                           className="btn-compact text-base font-medium text-ink-muted hover:text-danger"
                         >
                           Delete
@@ -537,6 +561,30 @@ export function Dashboard() {
             )}
           </section>
         </>
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title={`Delete “${pendingDelete.name}”?`}
+          busy={deleteBusy}
+          requireText={pendingDelete.name}
+          confirmLabel="Delete namespace"
+          message={
+            <>
+              <p>
+                This permanently removes the namespace, its Terraform files, stored state, run
+                history and backend tokens. It cannot be undone.
+              </p>
+              <p>
+                Real infrastructure is <span className="font-bold text-ink">not</span> destroyed —
+                run <span className="font-mono text-sm text-ink">terraform destroy</span> first if
+                you want the resources gone too.
+              </p>
+            </>
+          }
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void removeNamespace()}
+        />
       )}
     </AppShell>
   )

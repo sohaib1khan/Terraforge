@@ -118,11 +118,27 @@ export function ConfigSyncPanel({ namespaceId, refreshKey = 0 }: Props) {
         </button>
       </div>
 
+      {remote && remote.count === 0 && (
+        <p className="border-2 border-line/60 bg-paper/60 px-3 py-2 text-base text-ink">
+          Terraforge has no <span className="font-mono text-sm">.tf</span> files yet. The HTTP
+          backend only carries <span className="font-bold">state</span> — your config stays on your
+          machine until you push it, which is why the config map, in-app runs and drift checks are
+          empty. From your project folder run{' '}
+          <span className="font-mono text-sm">sh terraforge_connect/sync.sh</span>.
+        </p>
+      )}
+
       <ul className="space-y-1.5 text-base">
         <Check
           ok={!!remote && remote.count > 0}
           label="Terraforge has configuration files"
-          detail={remote ? `${remote.count} tracked file(s)` : 'empty / loading'}
+          detail={
+            remote
+              ? remote.count > 0
+                ? `${remote.count} tracked file(s)`
+                : 'none — run sh terraforge_connect/sync.sh'
+              : 'empty / loading'
+          }
         />
         <Check
           ok={!!linked}
@@ -173,7 +189,12 @@ export function ConfigSyncPanel({ namespaceId, refreshKey = 0 }: Props) {
       </div>
 
       <p className="font-mono text-sm opacity-90">
-        terraforge status · terraforge pull · terraforge sync · terraforge watch
+        sh terraforge_connect/sync.sh · sh terraforge_connect/pull.sh
+      </p>
+      <p className="text-sm opacity-80">
+        Those ship with the connect pack and need no extra tooling. The companion CLI adds{' '}
+        <span className="font-mono text-xs">terraforge status</span> and{' '}
+        <span className="font-mono text-xs">terraforge watch</span> for continuous sync.
       </p>
       {error && (
         <p className="text-sm text-danger" role="alert">

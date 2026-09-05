@@ -31,6 +31,8 @@ type SplitProps = {
   className?: string
   /** Accessible label for the drag handle */
   handleLabel?: string
+  /** CSS length floor for the second pane (VerticalSplit only). */
+  secondMin?: string
   first: React.ReactNode
   second: React.ReactNode
 }
@@ -186,6 +188,7 @@ export function VerticalSplit({
   max = 900,
   className = '',
   handleLabel = 'Drag to resize',
+  secondMin = '10rem',
   first,
   second,
 }: SplitProps) {
@@ -215,7 +218,7 @@ export function VerticalSplit({
         const rect = wrap.getBoundingClientRect()
         if (rect.height < 8) return
         const next = ev.clientY - rect.top
-        const cap = Math.min(max, Math.max(min, rect.height - 140))
+        const cap = Math.min(max, Math.max(min, rect.height - 80))
         setPx(clamp(next, min, cap))
       }
 
@@ -259,7 +262,7 @@ export function VerticalSplit({
     <div
       ref={wrapRef}
       className={`playground-vsplit ${className}`}
-      style={{ gridTemplateRows: `${px}px 14px minmax(10rem, 1fr)` }}
+      style={{ gridTemplateRows: `${px}px 14px minmax(${secondMin}, 1fr)` }}
     >
       <div className="playground-pane playground-vsplit-first">{first}</div>
       <button

@@ -1,5 +1,11 @@
-import { useId, useMemo } from 'react'
+import { useId, useMemo, useState } from 'react'
 import type { ConfigGraph, GraphNode, Run } from '../../api/client'
+import {
+  CONCEPTS,
+  LIFECYCLE,
+  lifecycleStep,
+  type LifecycleId,
+} from '../../lib/deployLessons'
 
 export type DeployPhase = 'idle' | 'planned' | 'creating' | 'created' | 'destroying' | 'destroyed'
 
@@ -122,12 +128,115 @@ function phaseLabel(st: NodeDeployState): string {
 }
 
 type BuildStory = {
+  /** 0 bare lot · 1 blueprint · 2 foundation · 3 walls · 4 roof · 5 finished */
   stage: 0 | 1 | 2 | 3 | 4 | 5
   headline: string
   detail: string
   mode: 'idle' | 'plan' | 'build' | 'remodel' | 'teardown' | 'done' | 'failed'
   progress: number
   activity: string | null
+  /** A run is queued/running, so motion should be playing. */
+  live: boolean
+}
+
+type LayerState = 'hidden' | 'building' | 'built' | 'removing'
+
+type Layers = {
+  blueprint: LayerState
+  foundation: LayerState
+  walls: LayerState
+  roof: LayerState
+  details: LayerState
+}
+
+const ALL_HIDDEN: Layers = {
+  blueprint: 'hidden',
+  foundation: 'hidden',
+  walls: 'hidden',
+  roof: 'hidden',
+  details: 'hidden',
+}
+
+/**
+ * Turn the stage number into per-layer states so each piece animates once,
+ * in build order going forward and in reverse order during a destroy.
+ */
+function deriveLayers(story: BuildStory): Layers {
+  const { mode, stage, live } = story
+
+  if (mode === 'teardown') {
+    // Planned but not started: the house is still standing.
+    if (!live) {
+      return {
+        blueprint: 'built',
+        foundation: 'built',
+        walls: 'built',
+        roof: 'built',
+        details: 'built',
+      }
+    }
+    switch (stage) {
+      case 5:
+        return { blueprint: 'hidden', foundation: 'built', walls: 'built', roof: 'built', details: 'removing' }
+      case 4:
+        return { blueprint: 'hidden', foundation: 'built', walls: 'built', roof: 'removing', details: 'hidden' }
+      case 3:
+        return { blueprint: 'hidden', foundation: 'built', walls: 'removing', roof: 'hidden', details: 'hidden' }
+      case 2:
+        return { blueprint: 'hidden', foundation: 'removing', walls: 'hidden', roof: 'hidden', details: 'hidden' }
+      default:
+        return ALL_HIDDEN
+    }
+  }
+
+  const animating = mode === 'build' || mode === 'remodel'
+  const order: Array<{ key: keyof Layers; at: number }> = [
+    { key: 'foundation', at: 2 },
+    { key: 'walls', at: 3 },
+    { key: 'roof', at: 4 },
+    { key: 'details', at: 5 },
+  ]
+
+  const layers: Layers = { ...ALL_HIDDEN }
+  for (const { key, at } of order) {
+    if (stage > at) layers[key] = 'built'
+    else if (stage === at) layers[key] = animating ? 'building' : 'built'
+  }
+
+  if (stage >= 1 && stage < 5 && mode !== 'done' && mode !== 'idle') {
+    layers.blueprint = mode === 'plan' && stage === 1 ? 'building' : 'built'
+  }
+
+  return layers
+}
+
+/** CSS class that plays a layer's entrance or exit exactly once. */
+function layerAnim(layer: keyof Layers, state: LayerState): string {
+  if (state === 'built' || state === 'hidden') return ''
+  if (state === 'removing') {
+    switch (layer) {
+      case 'roof':
+        return 'deploy-roof-lift'
+      case 'walls':
+        return 'deploy-walls-crumble'
+      case 'foundation':
+        return 'deploy-foundation-break'
+      default:
+        return 'deploy-fade-out'
+    }
+  }
+  switch (layer) {
+    case 'foundation':
+      return 'deploy-pour'
+    case 'walls':
+      return 'deploy-walls-build'
+    case 'roof':
+      return 'deploy-roof-drop'
+    case 'details':
+      return 'deploy-finish-in'
+    default:
+      return 'deploy-fade-in'
+  }
 }
 
 function deriveStory(
@@ -157,13 +266,15 @@ function deriveStory(
     states.some((s) => s.action === 'destroy') || run?.type === 'destroy'
 
   if (failed) {
+    const stage: BuildStory['stage'] = created >= total ? 5 : created > 0 ? 3 : 2
     return {
-      stage: 2,
+      stage,
       headline: 'Construction paused — something went wrong',
       detail: 'Check the CLI output below. Fix the config, then try terraform plan / apply again.',
       mode: 'failed',
       progress: created / total,
       activity,
+      live: false,
     }
   }
 
@@ -175,6 +286,7 @@ function deriveStory(
       mode: 'plan',
       progress: 0.15,
       activity: 'Fetching providers & modules…',
+      live: true,
     }
   }
 
@@ -186,13 +298,25 @@ function deriveStory(
       mode: 'plan',
       progress: 0.25,
       activity: null,
+      live: false,
     }
   }
 
   if (destroyHeavy && (live || destroyed > 0 || creating.length > 0)) {
-    const done = destroyed
-    const prog = Math.min(1, (done + creating.length * 0.5) / total)
-    if (success && destroyed >= planned + created) {
+    const prog = Math.min(1, (destroyed + creating.length * 0.5) / total)
+    if (!live && destroyed === 0) {
+      // Plan says these will go, but nothing has been removed yet.
+      return {
+        stage: 5,
+        headline: 'Teardown planned',
+        detail: 'The plan marks these pieces for removal. Run terraform destroy to start taking them down.',
+        mode: 'teardown',
+        progress: 0,
+        activity: null,
+        live: false,
+      }
+    }
+    if (destroyed >= total || (success && destroyed >= planned + created)) {
       return {
         stage: 0,
         headline: 'Lot cleared',
@@ -200,17 +324,32 @@ function deriveStory(
         mode: 'done',
         progress: 1,
         activity: null,
+        live: false,
       }
     }
+    // Walk the house apart in reverse: fixtures, roof, walls, foundation.
+    let stage: BuildStory['stage'] = 5
+    let headline = 'Removing fixtures'
+    if (prog >= 0.75) {
+      stage = 2
+      headline = 'Breaking up the foundation'
+    } else if (prog >= 0.5) {
+      stage = 3
+      headline = 'Taking down the walls'
+    } else if (prog >= 0.25) {
+      stage = 4
+      headline = 'Lifting off the roof'
+    }
     return {
-      stage: prog > 0.6 ? 1 : 2,
-      headline: live ? 'Teardown in progress' : 'Teardown planned',
+      stage,
+      headline: live ? headline : 'Teardown paused',
       detail: live
-        ? 'Workers are removing pieces in reverse order — same idea as terraform destroy.'
-        : 'Blueprint says these pieces will be removed. Run terraform destroy to start.',
+        ? 'Terraform destroys in reverse dependency order — dependents come off before what they rely on.'
+        : 'Some pieces are already gone. Run terraform destroy again to finish clearing the lot.',
       mode: 'teardown',
       progress: prog,
       activity: activity ?? (live ? 'Removing resources…' : null),
+      live,
     }
   }
 
@@ -222,18 +361,21 @@ function deriveStory(
       mode: 'plan',
       progress: 0.2,
       activity: null,
+      live: false,
     }
   }
 
   if (live && (run?.type === 'apply' || run?.type === 'plan')) {
     if (run.type === 'plan') {
+      // Planning against an existing deployment leaves the house standing.
       return {
-        stage: 1,
+        stage: created > 0 ? 5 : 1,
         headline: 'Drawing the blueprint',
         detail: 'terraform plan compares your .tf files to state — architects sketching before anyone builds.',
         mode: 'plan',
         progress: 0.35,
         activity: 'Computing changes…',
+        live: true,
       }
     }
     const prog = Math.min(0.95, (created + creating.length * 0.45) / total)
@@ -256,6 +398,7 @@ function deriveStory(
       mode: creating.some((s) => s.action === 'update') ? 'remodel' : 'build',
       progress: prog,
       activity: activity ?? 'Applying configuration…',
+      live: true,
     }
   }
 
@@ -267,6 +410,7 @@ function deriveStory(
       mode: 'done',
       progress: Math.max(created / total, success && run?.type === 'apply' ? 1 : created / total),
       activity: null,
+      live: false,
     }
   }
 
@@ -278,6 +422,7 @@ function deriveStory(
       mode: 'done',
       progress: 1,
       activity: null,
+      live: false,
     }
   }
 
@@ -288,6 +433,7 @@ function deriveStory(
     mode: 'idle',
     progress: 0,
     activity: null,
+    live: false,
   }
 }
 
@@ -298,15 +444,16 @@ function HouseScene({ story }: { story: BuildStory }) {
   const teardown = mode === 'teardown'
   const failed = mode === 'failed'
   const building = mode === 'build' || mode === 'remodel'
-  const planning = mode === 'plan'
   const done = mode === 'done' && stage >= 5 && !teardown
-  const liveSite = building || planning || (teardown && progress < 1)
+  const liveSite = story.live
 
-  const showFoundation = stage >= 2 || done || (mode === 'done' && stage >= 1)
-  const showWalls = stage >= 3 || done
-  const showRoof = stage >= 4 || done
-  const showDetails = stage >= 5 || done
-  const showBlueprint = (stage >= 1 && stage < 5 && !teardown) || planning
+  const layers = deriveLayers(story)
+  const showFoundation = layers.foundation !== 'hidden'
+  const showWalls = layers.walls !== 'hidden'
+  const showRoof = layers.roof !== 'hidden'
+  const showDetails = layers.details !== 'hidden'
+  const showBlueprint = layers.blueprint !== 'hidden'
+  const blueprintActive = layers.blueprint === 'building'
 
   return (
     <svg
@@ -384,8 +531,8 @@ function HouseScene({ story }: { story: BuildStory }) {
       {/* blueprint — draw-on dash animation */}
       {showBlueprint && (
         <g
-          className={stage === 1 || planning ? 'deploy-blueprint-active' : 'deploy-blueprint-ghost'}
-          opacity={stage === 1 || planning ? 0.95 : 0.3}
+          className={blueprintActive ? 'deploy-blueprint-active' : 'deploy-blueprint-ghost'}
+          opacity={blueprintActive ? 0.95 : 0.3}
         >
           <rect
             x="88"
@@ -406,7 +553,7 @@ function HouseScene({ story }: { story: BuildStory }) {
             strokeDasharray="180"
             className="deploy-blueprint-roof-draw"
           />
-          {(stage === 1 || planning) && (
+          {blueprintActive && (
             <>
               <g className="deploy-pencil">
                 <polygon points="200,95 214,108 208,112 194,99" fill="#c4892d" />
@@ -420,20 +567,20 @@ function HouseScene({ story }: { story: BuildStory }) {
         </g>
       )}
 
-      {/* foundation — rises / pours */}
+      {/* foundation — pours in, breaks apart on destroy */}
       {showFoundation && (
-        <g className={building && stage === 2 ? 'deploy-pour' : 'deploy-rise-in'}>
+        <g key={`foundation-${layers.foundation}`} className={layerAnim('foundation', layers.foundation)}>
           <rect
             x="95"
             y="168"
             width="130"
             height="18"
-            fill={teardown ? '#b03a5a88' : '#6b5a4a'}
+            fill={teardown ? '#a2566e' : '#6b5a4a'}
             stroke="#3d342c"
             strokeWidth="1"
-            className={building && stage === 2 ? 'deploy-part-glow' : undefined}
+            className={layers.foundation === 'building' ? 'deploy-part-glow' : undefined}
           />
-          {building && stage === 2 && (
+          {layers.foundation === 'building' && (
             <g className="deploy-sparks">
               <circle cx="110" cy="166" r="2" fill="#f0d878" />
               <circle cx="160" cy="164" r="2.5" fill="#fff" />
@@ -446,26 +593,33 @@ function HouseScene({ story }: { story: BuildStory }) {
         </g>
       )}
 
-      {/* walls — grow upward */}
+      {/* walls — grow upward, crumble on destroy */}
       {showWalls && (
-        <g className={building && stage === 3 ? 'deploy-walls-build' : 'deploy-rise-in'}>
+        <g key={`walls-${layers.walls}`} className={layerAnim('walls', layers.walls)}>
           <rect
             x="100"
             y="95"
             width="120"
             height="75"
-            fill={teardown ? '#b03a5a66' : '#f7f2fc'}
+            fill={teardown ? '#e8d0d8' : '#f7f2fc'}
             stroke={teardown ? '#b03a5a' : '#2d5661'}
             strokeWidth="2.5"
-            className={building && stage === 3 ? 'deploy-part-glow' : undefined}
+            className={layers.walls === 'building' ? 'deploy-part-glow' : undefined}
           />
-          <rect x="145" y="130" width="30" height="40" fill={teardown ? '#8a4055' : '#5c2d91'} className="deploy-door" />
+          <rect
+            x="145"
+            y="130"
+            width="30"
+            height="40"
+            fill={teardown ? '#8a4055' : '#5c2d91'}
+            className={done ? 'deploy-door' : undefined}
+          />
           <g className={done ? 'deploy-window-shine' : undefined}>
             <rect x="115" y="110" width="22" height="22" fill="#7eb8d4" stroke="#2d5661" strokeWidth="1.5" />
             <line x1="126" y1="110" x2="126" y2="132" stroke="#2d5661" strokeWidth="1" />
             <line x1="115" y1="121" x2="137" y2="121" stroke="#2d5661" strokeWidth="1" />
           </g>
-          {building && stage === 3 && (
+          {layers.walls === 'building' && (
             <g className="deploy-scaffold">
               <line x1="98" y1="100" x2="98" y2="170" stroke="#c4892d" strokeWidth="2" />
               <line x1="222" y1="100" x2="222" y2="170" stroke="#c4892d" strokeWidth="2" />
@@ -478,15 +632,15 @@ function HouseScene({ story }: { story: BuildStory }) {
         </g>
       )}
 
-      {/* roof — drops into place */}
+      {/* roof — drops into place, lifts off on destroy */}
       {showRoof && (
-        <g className={building && stage === 4 ? 'deploy-roof-drop' : 'deploy-rise-in'}>
+        <g key={`roof-${layers.roof}`} className={layerAnim('roof', layers.roof)}>
           <path
             d="M90 98 L160 42 L230 98 Z"
             fill={`url(#roof-${uid})`}
             stroke="#3d2460"
             strokeWidth="2"
-            className={building && stage === 4 ? 'deploy-part-glow' : undefined}
+            className={layers.roof === 'building' ? 'deploy-part-glow' : undefined}
           />
           <text x="160" y="78" textAnchor="middle" fill="#f5efe6" fontSize="10" fontFamily="var(--font-sans)">
             roof
@@ -494,18 +648,20 @@ function HouseScene({ story }: { story: BuildStory }) {
         </g>
       )}
 
-      {/* chimney + smoke + flag when done */}
-      {showDetails && !teardown && (
-        <g className="deploy-finish-in">
+      {/* chimney + smoke + flag — the finishing touches */}
+      {showDetails && (
+        <g key={`details-${layers.details}`} className={layerAnim('details', layers.details)}>
           <rect x="190" y="55" width="14" height="28" fill="#5c5278" />
-          <g className="deploy-smoke">
-            <circle cx="197" cy="48" r="5" fill="#9b8eb8" opacity="0.5" />
-            <circle cx="202" cy="38" r="6" fill="#9b8eb8" opacity="0.35" />
-            <circle cx="195" cy="28" r="7" fill="#9b8eb8" opacity="0.25" />
-          </g>
-          <g className="deploy-flag">
+          {layers.details !== 'removing' && (
+            <g className="deploy-smoke">
+              <circle cx="197" cy="48" r="5" fill="#9b8eb8" opacity="0.5" />
+              <circle cx="202" cy="38" r="6" fill="#9b8eb8" opacity="0.35" />
+              <circle cx="195" cy="28" r="7" fill="#9b8eb8" opacity="0.25" />
+            </g>
+          )}
+          <g className={layers.details === 'removing' ? undefined : 'deploy-flag'}>
             <line x1="120" y1="55" x2="120" y2="95" stroke="#3d2460" strokeWidth="2" />
-            <path d="M120 55 L148 64 L120 73 Z" fill="#2f9b7a" />
+            <path d="M120 55 L148 64 L120 73 Z" fill={teardown ? '#b03a5a' : '#2f9b7a'} />
           </g>
           {done && (
             <text x="160" y="208" textAnchor="middle" fill="#1f7a5c" fontSize="11" fontFamily="var(--font-sans)" fontWeight="700">
@@ -515,8 +671,8 @@ function HouseScene({ story }: { story: BuildStory }) {
         </g>
       )}
 
-      {/* dust / debris for teardown */}
-      {teardown && progress < 1 && (
+      {/* dust kicked up while pieces come off */}
+      {teardown && liveSite && (
         <g className="deploy-dust">
           <circle cx="130" cy="150" r="4" fill="#9b8eb8" />
           <circle cx="170" cy="140" r="5" fill="#b0a4c4" />
@@ -526,7 +682,7 @@ function HouseScene({ story }: { story: BuildStory }) {
       )}
 
       {/* crane with swinging boom + hook load */}
-      {(building || (teardown && progress < 1) || (planning && stage >= 1)) && (
+      {liveSite && (
         <g className="deploy-crane">
           <line x1="258" y1="30" x2="258" y2="188" stroke="#4a4060" strokeWidth="3.5" />
           <line x1="250" y1="188" x2="266" y2="188" stroke="#4a4060" strokeWidth="4" />
@@ -543,8 +699,8 @@ function HouseScene({ story }: { story: BuildStory }) {
         </g>
       )}
 
-      {/* floating progress ring while live build */}
-      {building && (
+      {/* floating progress ring while a run is in flight */}
+      {(building || (teardown && liveSite)) && (
         <g transform="translate(28 28)">
           <circle cx="0" cy="0" r="16" fill="none" stroke="#9b8eb8" strokeWidth="3" opacity="0.35" />
           <circle
@@ -553,13 +709,21 @@ function HouseScene({ story }: { story: BuildStory }) {
             cy="0"
             r="16"
             fill="none"
-            stroke="#2f9b7a"
+            stroke={teardown ? '#b03a5a' : '#2f9b7a'}
             strokeWidth="3"
             strokeLinecap="round"
             strokeDasharray={`${Math.max(4, progress * 100)} 100`}
             transform="rotate(-90)"
           />
-          <text x="0" y="4" textAnchor="middle" fill="#1f7a5c" fontSize="9" fontFamily="var(--font-mono)" fontWeight="700">
+          <text
+            x="0"
+            y="4"
+            textAnchor="middle"
+            fill={teardown ? '#b03a5a' : '#1f7a5c'}
+            fontSize="9"
+            fontFamily="var(--font-mono)"
+            fontWeight="700"
+          >
             {Math.round(progress * 100)}
           </text>
         </g>
@@ -573,6 +737,142 @@ function HouseScene({ story }: { story: BuildStory }) {
         </g>
       )}
     </svg>
+  )
+}
+
+/** Which lifecycle step the workspace is sitting on right now. */
+function deriveLifecycle(
+  run: Run | null,
+  states: NodeDeployState[],
+  hasState: boolean,
+): LifecycleId {
+  if (run && (run.status === 'queued' || run.status === 'running')) {
+    if (run.type === 'init') return 'init'
+    if (run.type === 'plan') return 'plan'
+    if (run.type === 'destroy') return 'destroy'
+    return 'apply'
+  }
+  const created = states.some((s) => s.phase === 'created')
+  const planned = states.some((s) => s.phase === 'planned')
+  if (run?.type === 'destroy' && run.status === 'success') return 'destroy'
+  if (created || hasState) return 'apply'
+  if (planned) return 'apply'
+  if (run?.type === 'init' && run.status === 'success') return 'plan'
+  return 'write'
+}
+
+/** The command we nudge the learner toward next. */
+function nextAction(
+  run: Run | null,
+  states: NodeDeployState[],
+  hasState: boolean,
+  nodeCount: number,
+): { command: string; why: string } | null {
+  if (run && (run.status === 'queued' || run.status === 'running')) return null
+  if (nodeCount === 0) {
+    return { command: 'write a resource block', why: 'No resources found in the .tf files yet.' }
+  }
+  if (run?.type === 'destroy' && run.status === 'success') {
+    return {
+      command: 'terraform apply',
+      why: 'The lot is clear but the config is intact — apply rebuilds it.',
+    }
+  }
+  if (run?.type === 'init' && run.status === 'success') {
+    return { command: 'terraform plan', why: 'Providers are installed — now preview the changes.' }
+  }
+  if (states.some((s) => s.phase === 'planned')) {
+    return { command: 'terraform apply', why: 'A plan exists but nothing is built yet.' }
+  }
+  if (states.some((s) => s.phase === 'created') || hasState) {
+    return {
+      command: 'terraform plan',
+      why: 'Resources exist. Edit a .tf file, then plan to see the diff.',
+    }
+  }
+  if (run?.status === 'failed') {
+    return { command: 'terraform validate', why: 'The last run failed — check syntax first.' }
+  }
+  return { command: 'terraform init', why: 'Providers must be installed before planning.' }
+}
+
+/** Plan symbol counts (+ ~ -) plus how many are already built. */
+function summarize(states: NodeDeployState[]) {
+  let add = 0
+  let change = 0
+  let destroy = 0
+  let built = 0
+  let removed = 0
+  for (const s of states) {
+    if (s.phase === 'created') built++
+    else if (s.phase === 'destroyed') removed++
+    else if (s.phase === 'planned') {
+      if (s.action === 'destroy') destroy++
+      else if (s.action === 'update') change++
+      else add++
+    }
+  }
+  return { add, change, destroy, built, removed }
+}
+
+/** Plain-language note about what a resource type does for real. */
+function partExplain(node: GraphNode): string {
+  const t = (node.type ?? '').toLowerCase()
+  if (t === 'local_file') return 'Writes a file on the runner’s disk from content you define.'
+  if (t === 'random_id') return 'Generates a stable random identifier, kept in state so it does not churn.'
+  if (t === 'random_pet') return 'Generates a friendly random name, useful for unique resource names.'
+  if (t === 'random_password') return 'Generates a secret value and stores it in state.'
+  if (t.startsWith('random_')) return 'Generates a value once and remembers it in state.'
+  if (node.kind === 'data') return 'Reads existing information — never creates or changes anything.'
+  if (node.kind === 'module') return 'A reusable group of resources called with input variables.'
+  return 'A resource managed by its provider through create / update / destroy API calls.'
+}
+
+function LifecycleStepper({
+  current,
+  onPick,
+  selected,
+}: {
+  current: LifecycleId
+  selected: LifecycleId
+  onPick: (id: LifecycleId) => void
+}) {
+  const order = LIFECYCLE.map((s) => s.id)
+  const currentIdx = order.indexOf(current)
+  return (
+    <ol className="flex flex-wrap gap-1.5">
+      {LIFECYCLE.map((s, i) => {
+        const isCurrent = s.id === current
+        const isDone = i < currentIdx
+        const isSel = s.id === selected
+        return (
+          <li key={s.id}>
+            <button
+              type="button"
+              onClick={() => onPick(s.id)}
+              aria-current={isCurrent ? 'step' : undefined}
+              className={`deploy-step flex items-center gap-1.5 rounded border px-2 py-1 text-left ${
+                isSel ? 'deploy-step-selected' : ''
+              } ${
+                isCurrent
+                  ? 'border-moss bg-moss/15'
+                  : isDone
+                    ? 'border-ok/40 bg-ok/10'
+                    : 'border-line/60 bg-panel/70 hover:border-ember'
+              }`}
+            >
+              <span className="font-mono text-[0.6rem] font-bold text-ink-muted">{i + 1}</span>
+              <span className="text-xs font-semibold text-ink">{s.label}</span>
+              {isCurrent && (
+                <span className="rounded bg-moss/25 px-1 font-mono text-[0.55rem] font-bold uppercase text-moss-deep">
+                  here
+                </span>
+              )}
+            </button>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
@@ -614,19 +914,33 @@ export function DeployMap({
   )
 
   const live = run?.status === 'queued' || run?.status === 'running'
+  const hasState = graph?.has_state ?? false
+
+  const states = useMemo(() => parts.map((p) => p.st), [parts])
+  const current = useMemo(() => deriveLifecycle(run, states, hasState), [run, states, hasState])
+  const counts = useMemo(() => summarize(states), [states])
+  const next = useMemo(
+    () => nextAction(run, states, hasState, resourceNodes.length),
+    [run, states, hasState, resourceNodes.length],
+  )
+
+  const [picked, setPicked] = useState<LifecycleId | null>(null)
+  const [openConcept, setOpenConcept] = useState<string | null>(null)
+  const shown = picked ?? current
+  const lesson = lifecycleStep(shown)
 
   return (
     <section
       className={`deploy-map flex h-full min-h-0 flex-col border-2 border-line/70 bg-panel/80 ${
-        compact ? 'gap-2 p-3' : 'gap-4 p-4'
+        compact ? 'gap-2 p-3' : 'gap-3 p-4'
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className={`font-display font-bold ${compact ? 'text-base' : 'text-lg'}`}>Live deploy</h2>
           {!compact && (
-            <p className="mt-1 text-sm text-ink-muted">
-              Resources as a house — blueprint → foundation → walls → roof.
+            <p className="mt-0.5 text-sm text-ink-muted">
+              Follow one apply end to end: what Terraform is doing, and why.
             </p>
           )}
         </div>
@@ -681,19 +995,154 @@ export function DeployMap({
         </div>
       </div>
 
+      {!compact && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border border-line/60 bg-panel/60 px-3 py-2">
+          <p className="shrink-0 text-[0.65rem] font-bold uppercase tracking-wide text-ink-muted">
+            Lifecycle
+          </p>
+          <LifecycleStepper current={current} selected={shown} onPick={(id) => setPicked(id)} />
+          {next && (
+            <p className="ml-auto text-xs text-ink-muted">
+              Next: <code className="font-mono text-ember-deep">{next.command}</code> — {next.why}
+            </p>
+          )}
+        </div>
+      )}
+
       <div
         className={`min-h-0 flex-1 ${
           compact
             ? 'grid gap-2 sm:grid-cols-[minmax(0,9.5rem)_minmax(0,1fr)]'
-            : 'grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]'
+            : 'grid gap-3 lg:grid-cols-[minmax(0,15rem)_minmax(0,1.15fr)_minmax(0,1.15fr)]'
         }`}
       >
-        <div className="flex items-center justify-center border border-line/60 bg-[linear-gradient(165deg,#d5dde8_0%,#d8e8dc_100%)] p-1">
-          <HouseScene story={story} />
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-1 items-center justify-center border border-line/60 bg-[linear-gradient(165deg,#d5dde8_0%,#d8e8dc_100%)] p-1">
+            <HouseScene story={story} />
+          </div>
+          {!compact && (
+            <p className="text-[0.65rem] leading-snug text-ink-muted">
+              The house is the metaphor: each resource is one part, built in dependency order.
+            </p>
+          )}
         </div>
 
+        {!compact && (
+          <div className="min-h-0 space-y-2 overflow-auto pr-1">
+            <div className="border border-line/60 bg-panel/70 p-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <p className="font-display text-sm font-bold text-ink">{lesson.label}</p>
+                <code className="font-mono text-xs text-ember-deep">{lesson.command}</code>
+                {shown !== current && (
+                  <button
+                    type="button"
+                    onClick={() => setPicked(null)}
+                    className="ml-auto font-mono text-[0.65rem] text-ink-muted hover:text-ink hover:underline"
+                  >
+                    back to current
+                  </button>
+                )}
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-ink">{lesson.what}</p>
+              <dl className="mt-2 space-y-1.5 text-xs">
+                <div>
+                  <dt className="font-semibold uppercase tracking-wide text-moss-deep">Watch for</dt>
+                  <dd className="text-ink-muted">{lesson.watch}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold uppercase tracking-wide text-ink-muted">Touches</dt>
+                  <dd className="font-mono text-ink-muted">{lesson.touches}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold uppercase tracking-wide text-ink-muted">In the picture</dt>
+                  <dd className="text-ink-muted">{lesson.analogy}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="border border-line/60 bg-panel/70 p-3">
+              <p className="text-[0.65rem] font-bold uppercase tracking-wide text-ink-muted">
+                Change summary
+              </p>
+              <ul className="mt-2 grid grid-cols-2 gap-1.5 text-xs sm:grid-cols-3">
+                <li className="border border-ok/40 bg-ok/10 px-2 py-1">
+                  <span className="font-mono font-bold text-moss-deep">+ {counts.add}</span>
+                  <span className="block text-ink-muted">to create</span>
+                </li>
+                <li className="border border-ember/40 bg-ember/10 px-2 py-1">
+                  <span className="font-mono font-bold text-ember-deep">~ {counts.change}</span>
+                  <span className="block text-ink-muted">to update</span>
+                </li>
+                <li className="border border-danger/40 bg-danger/10 px-2 py-1">
+                  <span className="font-mono font-bold text-danger">- {counts.destroy}</span>
+                  <span className="block text-ink-muted">to destroy</span>
+                </li>
+                <li className="border border-line/60 px-2 py-1">
+                  <span className="font-mono font-bold text-ink">{counts.built}</span>
+                  <span className="block text-ink-muted">in state</span>
+                </li>
+                <li className="border border-line/60 px-2 py-1">
+                  <span className="font-mono font-bold text-ink">{resourceNodes.length}</span>
+                  <span className="block text-ink-muted">declared</span>
+                </li>
+                <li className="border border-line/60 px-2 py-1">
+                  <span className="font-mono font-bold text-ink">{graph?.files_scanned ?? 0}</span>
+                  <span className="block text-ink-muted">files read</span>
+                </li>
+              </ul>
+              <p className="mt-2 text-[0.7rem] leading-snug text-ink-muted">
+                These are the same numbers as the <code className="font-mono">Plan:</code> line in the
+                CLI output. Terraform decides them by diffing your config against state.
+              </p>
+            </div>
+
+            <div className="border border-line/60 bg-panel/70 p-3">
+              <p className="text-[0.65rem] font-bold uppercase tracking-wide text-ink-muted">
+                Concepts — tap to expand
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {CONCEPTS.map((c) => (
+                  <button
+                    key={c.term}
+                    type="button"
+                    onClick={() => setOpenConcept((v) => (v === c.term ? null : c.term))}
+                    className={`rounded border px-2 py-0.5 text-xs ${
+                      openConcept === c.term
+                        ? 'border-ember bg-ember/20 font-semibold text-ink'
+                        : 'border-line/60 text-ink-muted hover:border-ember hover:text-ink'
+                    }`}
+                  >
+                    {c.term}
+                  </button>
+                ))}
+              </div>
+              {openConcept ? (
+                (() => {
+                  const c = CONCEPTS.find((x) => x.term === openConcept)
+                  if (!c) return null
+                  return (
+                    <div className="mt-2 border-l-2 border-ember/60 pl-2">
+                      <p className="text-xs font-semibold text-ink">{c.short}</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{c.detail}</p>
+                    </div>
+                  )
+                })()
+              ) : (
+                <p className="mt-2 text-[0.7rem] text-ink-muted">
+                  Eight ideas that explain most Terraform behaviour.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="min-h-0 space-y-1.5 overflow-auto">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-muted">Parts</p>
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-ink-muted">Parts</p>
+            {!compact && parts.length > 0 && (
+              <p className="font-mono text-[0.6rem] text-ink-muted">type.name = resource address</p>
+            )}
+          </div>
           {loading && !graph ? (
             <p className="text-sm text-ink-muted">Reading…</p>
           ) : parts.length === 0 ? (
@@ -708,7 +1157,7 @@ export function DeployMap({
                 return (
                   <li
                     key={node.id}
-                    className={`flex items-center justify-between gap-2 border px-2 py-1.5 ${
+                    className={`border px-2 py-1.5 ${
                       active
                         ? 'deploy-part-active border-moss bg-moss/15'
                         : st.phase === 'created'
@@ -720,17 +1169,50 @@ export function DeployMap({
                               : 'border-line/50 bg-panel/70'
                     }`}
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-ink">{friend.title}</p>
-                      <p className="truncate font-mono text-[0.65rem] text-ink-muted">{node.id}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-ink">{friend.title}</p>
+                        <p className="truncate font-mono text-[0.65rem] text-ink-muted">{node.id}</p>
+                      </div>
+                      <span
+                        className={`shrink-0 font-mono text-[0.65rem] font-bold uppercase ${
+                          active ? 'deploy-pulse text-moss-deep' : 'text-ink-muted'
+                        }`}
+                      >
+                        {phaseLabel(st)}
+                      </span>
                     </div>
-                    <span
-                      className={`shrink-0 font-mono text-[0.65rem] font-bold uppercase ${
-                        active ? 'deploy-pulse text-moss-deep' : 'text-ink-muted'
-                      }`}
-                    >
-                      {phaseLabel(st)}
-                    </span>
+                    {!compact && (
+                      <>
+                        <p className="mt-1 text-[0.7rem] leading-snug text-ink-muted">
+                          {partExplain(node)}
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {node.provider && (
+                            <span className="rounded border border-line/50 px-1 font-mono text-[0.6rem] text-ink-muted">
+                              provider {node.provider}
+                            </span>
+                          )}
+                          <span className="rounded border border-line/50 px-1 font-mono text-[0.6rem] text-ink-muted">
+                            {node.kind}
+                          </span>
+                          {node.file && (
+                            <span className="rounded border border-line/50 px-1 font-mono text-[0.6rem] text-ink-muted">
+                              {node.file}
+                            </span>
+                          )}
+                          <span
+                            className={`rounded border px-1 font-mono text-[0.6rem] ${
+                              node.in_state
+                                ? 'border-ok/40 text-moss-deep'
+                                : 'border-line/50 text-ink-muted'
+                            }`}
+                          >
+                            {node.in_state ? 'in state' : 'not in state'}
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </li>
                 )
               })}

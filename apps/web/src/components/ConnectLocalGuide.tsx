@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { api, ApiError } from '../api/client'
+import { selectElementContents } from '../lib/clipboard'
+import { CopyButton } from './CopyButton'
 
 type Props = {
   open: boolean
@@ -9,33 +11,7 @@ type Props = {
   onInstalled?: () => void
 }
 
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText && window.isSecureContext) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    /* fall through */
-  }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.setAttribute('readonly', '')
-    ta.style.position = 'fixed'
-    ta.style.left = '-9999px'
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    return ok
-  } catch {
-    return false
-  }
-}
-
 function CopyBlock({ label, text }: { label: string; text: string }) {
-  const [status, setStatus] = useState<'idle' | 'ok' | 'fail'>('idle')
   const preRef = useRef<HTMLPreElement>(null)
   return (
     <div className="space-y-2">
@@ -45,29 +21,15 @@ function CopyBlock({ label, text }: { label: string; text: string }) {
           <button
             type="button"
             className="btn-secondary btn-compact px-3 text-sm"
-            onClick={() => {
-              const el = preRef.current
-              if (!el) return
-              const range = document.createRange()
-              range.selectNodeContents(el)
-              const sel = window.getSelection()
-              sel?.removeAllRanges()
-              sel?.addRange(range)
-            }}
+            onClick={() => selectElementContents(preRef.current)}
           >
             Select all
           </button>
-          <button
-            type="button"
+          <CopyButton
+            text={text}
+            selectRef={preRef}
             className="btn-primary btn-compact px-3 text-sm"
-            onClick={async () => {
-              const ok = await copyText(text)
-              setStatus(ok ? 'ok' : 'fail')
-              window.setTimeout(() => setStatus('idle'), 2000)
-            }}
-          >
-            {status === 'ok' ? 'Copied!' : status === 'fail' ? 'Select all + Ctrl+C' : 'Copy'}
-          </button>
+          />
         </div>
       </div>
       <pre

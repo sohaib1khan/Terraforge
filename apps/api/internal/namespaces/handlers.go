@@ -172,8 +172,12 @@ type createRequest struct {
 }
 
 type settingsRequest struct {
-	RequireApproval      *bool `json:"require_approval"`
-	DriftIntervalMinutes *int  `json:"drift_interval_minutes"`
+	Name                 *string `json:"name"`
+	TerraformVersion     *string `json:"terraform_version"`
+	RequireApproval      *bool   `json:"require_approval"`
+	DriftIntervalMinutes *int    `json:"drift_interval_minutes"`
+	// Set false to promote a playground into a normal dashboard namespace.
+	IsPlayground *bool `json:"is_playground"`
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -298,8 +302,11 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ns, err := h.svc.UpdateSettings(r.Context(), id, UpdateSettingsInput{
+		Name:                 req.Name,
+		TerraformVersion:     req.TerraformVersion,
 		RequireApproval:      req.RequireApproval,
 		DriftIntervalMinutes: req.DriftIntervalMinutes,
+		IsPlayground:         req.IsPlayground,
 	})
 	if err != nil {
 		writeServiceError(w, err)
@@ -311,8 +318,11 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		actor = claims.Email
 	}
 	h.audit.Write(r.Context(), actor, "namespace.settings", id.String(), map[string]any{
-		"require_approval": ns.RequireApproval,
-		"drift_interval":   ns.DriftIntervalMinutes,
+		"name":              ns.Name,
+		"terraform_version": ns.TerraformVersion,
+		"require_approval":  ns.RequireApproval,
+		"drift_interval":    ns.DriftIntervalMinutes,
+		"is_playground":     ns.IsPlayground,
 	})
 	httpx.WriteJSON(w, http.StatusOK, ns)
 }

@@ -5,6 +5,7 @@ import { Dashboard } from './pages/Dashboard'
 import { Documentation } from './pages/Documentation'
 import { FirstRunSetup } from './pages/FirstRunSetup'
 import { Login } from './pages/Login'
+import { Namespaces } from './pages/Namespaces'
 import { NamespaceView } from './pages/NamespaceView'
 import { Playground } from './pages/Playground'
 import { Providers } from './pages/Providers'
@@ -41,6 +42,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Dashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/namespaces"
+        element={
+          <RequireAuth>
+            <Namespaces />
           </RequireAuth>
         }
       />

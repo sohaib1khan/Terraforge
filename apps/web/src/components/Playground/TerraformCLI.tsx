@@ -11,7 +11,7 @@ import {
   type Suggestion,
   type TfCliCommand,
 } from '../../lib/terraformCli'
-import { HorizontalSplit } from './ResizableLayout'
+import { HorizontalSplit, VerticalSplit } from './ResizableLayout'
 
 type Props = {
   namespaceId: string
@@ -52,9 +52,25 @@ export function TerraformCLI({
   const [openSuggest, setOpenSuggest] = useState(false)
   /** Sticky selection when user clicks a chip / picks autocomplete */
   const [pinned, setPinned] = useState<TfCliCommand | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const transcriptRef = useRef<HTMLDivElement>(null)
 
   const fromLine = useMemo(() => activeCommandFromLine(input), [input])
   const active = fromLine ?? pinned
+
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [history])
+
+  useEffect(() => {
+    if (!expanded) return
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExpanded(false)
+    }
+    window.addEventListener('keydown', onEsc)
+    return () => window.removeEventListener('keydown', onEsc)
+  }, [expanded])
 
   useEffect(() => {
     setSuggestions(suggestTerraformCli(input))
@@ -259,19 +275,15 @@ export function TerraformCLI({
     </aside>
   )
 
-  const terminal = (
-    <div className="flex h-full min-h-0 min-w-0 flex-col border-2 border-line/70 bg-panel/80">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 px-3 py-2">
-        <h2 className="font-display text-base font-bold">Terraform CLI</h2>
-        <p className="font-mono text-xs text-ink-muted">Tab = complete · help = catalog</p>
-      </div>
-
+  const transcript = (
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div
-        className="max-h-16 overflow-auto bg-[#1a1528] px-3 py-1.5 font-mono text-xs leading-relaxed text-[#d8e1e9]"
+        ref={transcriptRef}
+        className="tf-cli-transcript min-h-0 flex-1 overflow-auto bg-[#1a1528] px-3 py-2 font-mono text-xs leading-relaxed text-[#d8e1e9]"
         aria-live="polite"
         onClick={() => inputRef.current?.focus()}
       >
-        {history.slice(-8).map((h, i) =>
+        {history.slice(-400).map((h, i) =>
           h.kind === 'in' ? (
             <div key={i} className="text-[#c9b6f0]">
               <span className="text-[#7a8b9a]">$ </span>
@@ -290,7 +302,7 @@ export function TerraformCLI({
         )}
       </div>
 
-      <div className="relative border-t border-white/10 bg-[#120b1f] px-2 py-1.5">
+      <div className="relative shrink-0 border-t border-white/10 bg-[#120b1f] px-2 py-1.5">
         {openSuggest && suggestions.length > 0 && (
           <ul
             id={listId}
@@ -346,15 +358,46 @@ export function TerraformCLI({
           {busy && <span className="shrink-0 text-xs uppercase text-warn">running…</span>}
         </label>
       </div>
+    </div>
+  )
 
-      <div className="min-h-0 flex-1 border-t border-line/60">
-        <LogConsole namespaceId={namespaceId} runId={runId} run={run} compact onLogLine={onLogLine} />
+  const terminal = (
+    <div className="flex h-full min-h-0 min-w-0 flex-col border-2 border-line/70 bg-panel/80">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line/60 px-3 py-2">
+        <h2 className="font-display text-base font-bold">Terraform CLI</h2>
+        <div className="flex items-center gap-2">
+          <p className="font-mono text-xs text-ink-muted">Tab = complete · help = catalog</p>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? 'Exit full screen (Esc)' : 'Expand to full screen'}
+            className="rounded border border-line/60 px-1.5 py-0.5 font-mono text-xs text-ink-muted hover:border-ember hover:text-ink"
+          >
+            {expanded ? '⤡ exit' : '⤢ expand'}
+          </button>
+        </div>
       </div>
+
+      <VerticalSplit
+        storageKey="tf-pg-cli-term"
+        initial={220}
+        min={80}
+        max={1200}
+        className="playground-vsplit-tight min-h-0 flex-1"
+        secondMin="0px"
+        handleLabel="Drag to resize terminal vs run output"
+        first={transcript}
+        second={
+          <div className="h-full min-h-0 border-t border-line/60">
+            <LogConsole namespaceId={namespaceId} runId={runId} run={run} compact onLogLine={onLogLine} />
+          </div>
+        }
+      />
     </div>
   )
 
   return (
-    <section className="tf-cli h-full min-h-0 border-0">
+    <section className={`tf-cli h-full min-h-0 border-0 ${expanded ? 'tf-cli-expanded' : ''}`}>
       <HorizontalSplit
         storageKey="tf-pg-cli-def"
         initial={68}

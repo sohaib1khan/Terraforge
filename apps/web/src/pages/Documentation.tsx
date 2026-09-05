@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
   ApiError,
@@ -7,6 +7,7 @@ import {
   type ModuleSummary,
 } from '../api/client'
 import { AppShell } from '../components/AppShell'
+import { CopyButton } from '../components/CopyButton'
 
 const PAGE_SIZE = 50
 
@@ -34,27 +35,20 @@ function formatTotal(n: number): string {
 }
 
 function SnippetCard({ title, code }: { title: string; code: string }) {
-  const [copied, setCopied] = useState(false)
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // ignore
-    }
-  }
+  const preRef = useRef<HTMLPreElement>(null)
 
   return (
     <div className="border border-line bg-panel/90">
       <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
         <p className="text-sm font-medium text-ink">{title}</p>
-        <button type="button" onClick={() => void copy()} className="btn-secondary btn-compact px-3 text-base">
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <CopyButton text={code} selectRef={preRef} />
       </div>
-      <pre className="overflow-auto bg-ink p-4 font-mono text-base leading-relaxed text-panel">{code}</pre>
+      <pre
+        ref={preRef}
+        className="overflow-auto bg-ink p-4 font-mono text-base leading-relaxed text-panel"
+      >
+        {code}
+      </pre>
     </div>
   )
 }
