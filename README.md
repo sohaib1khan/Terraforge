@@ -20,6 +20,12 @@ The stack is Docker Compose first: API and worker (Go), Postgres, Redis, a Terra
 
 This repo will keep growing; treat the list above as the current baseline, not a finished product catalog.
 
+## How to use the UI
+
+Step-by-step product guide (Dashboard, namespaces, local connect, Playground, Settings), with a place to drop screenshots:
+
+→ **[guide/HOW_TO_USE.md](./guide/HOW_TO_USE.md)** · screenshots go in **[guide/img/](./guide/img/)**
+
 ## Architecture (short)
 
 | Piece | Role |
