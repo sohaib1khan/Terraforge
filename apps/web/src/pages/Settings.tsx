@@ -194,8 +194,6 @@ export function Settings() {
             />
             Grant admin access
           </label>
-          {error && <p className="text-sm text-danger">{error}</p>}
-          {success && <p className="text-sm text-ok">{success}</p>}
           <button
             type="submit"
             disabled={busy}
@@ -206,42 +204,62 @@ export function Settings() {
         </form>
       </section>
 
+      {(error || success) && (
+        <p
+          className={`mt-5 max-w-4xl border px-3 py-2 text-sm ${
+            error
+              ? 'border-danger/40 bg-danger/10 text-danger'
+              : 'border-moss/40 bg-moss/10 text-ink'
+          }`}
+          role={error ? 'alert' : 'status'}
+        >
+          {error || success}
+        </p>
+      )}
+
       <section className="mt-10">
         <h2 className="font-display text-xl font-bold text-ink">Users</h2>
         {loading ? (
           <p className="mt-4 text-ink-muted">Loading…</p>
         ) : (
-          <ul className="mt-4 max-w-3xl divide-y-2 divide-line border-2 border-line bg-panel/80">
+          <ul className="mt-4 max-w-4xl divide-y-2 divide-line border-2 border-line bg-panel/80">
             {users.map((u) => (
-              <li key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                <div>
-                  <p className="text-lg font-bold text-ink">
+              <li
+                key={u.id}
+                className="grid grid-cols-1 gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-lg font-bold text-ink">
                     {u.email}
                     {u.id === user?.id ? (
                       <span className="ml-2 text-sm font-medium text-ink-muted">(you)</span>
                     ) : null}
                   </p>
-                  <p className="text-base text-ink-muted">
+                  <p className="mt-0.5 text-sm text-ink-muted">
                     joined {new Date(u.created_at).toLocaleString()}
                     {u.disabled_at ? ' · disabled' : ''}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 md:justify-end">
                   <span
-                    className={`text-base font-bold ${u.is_admin ? 'text-ember-deep' : 'text-ink-muted'}`}
+                    className={`inline-flex min-w-[4.5rem] justify-center rounded border px-2 py-1 text-xs font-bold uppercase tracking-wide ${
+                      u.is_admin
+                        ? 'border-ember/50 bg-ember/10 text-ember-deep'
+                        : 'border-line/70 bg-paper text-ink-muted'
+                    }`}
                   >
                     {u.is_admin ? 'admin' : 'user'}
                   </span>
                   <button
                     type="button"
-                    className="btn-secondary btn-compact px-3 text-base"
+                    className="btn-secondary btn-compact px-3 text-sm"
                     onClick={() => startEdit(u)}
                   >
                     Edit
                   </button>
                   <button
                     type="button"
-                    className="btn-secondary btn-compact px-3 text-base"
+                    className="btn-secondary btn-compact px-3 text-sm"
                     onClick={() => {
                       setResetTarget(u)
                       setResetPassword('')
@@ -254,7 +272,7 @@ export function Settings() {
                   {u.disabled_at ? (
                     <button
                       type="button"
-                      className="btn-secondary btn-compact px-3 text-base"
+                      className="btn-secondary btn-compact px-3 text-sm"
                       onClick={() => void toggleDisabled(u)}
                     >
                       Enable
@@ -262,7 +280,7 @@ export function Settings() {
                   ) : (
                     <button
                       type="button"
-                      className="btn-compact border-2 border-danger px-3 text-base font-bold text-danger"
+                      className="btn-compact border-2 border-danger px-3 text-sm font-bold text-danger disabled:opacity-50"
                       disabled={u.id === user?.id}
                       onClick={() => void toggleDisabled(u)}
                     >
@@ -271,7 +289,7 @@ export function Settings() {
                   )}
                   <button
                     type="button"
-                    className="btn-compact border-2 border-danger/50 px-3 text-base font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
+                    className="btn-compact border-2 border-danger px-3 text-sm font-bold text-danger hover:bg-danger/10 disabled:opacity-50"
                     disabled={u.id === user?.id}
                     onClick={() => setPendingDelete(u)}
                   >
