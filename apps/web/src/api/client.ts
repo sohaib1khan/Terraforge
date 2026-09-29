@@ -374,6 +374,9 @@ export const api = {
   listUsers: () => request<{ users: User[] }>('/api/users'),
   createUser: (body: { email: string; password: string; is_admin?: boolean }) =>
     request<User>('/api/users', { method: 'POST', body: JSON.stringify(body) }),
+  updateUser: (id: string, body: { email?: string; is_admin?: boolean }) =>
+    request<User>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteUser: (id: string) => request<void>(`/api/users/${id}`, { method: 'DELETE' }),
   resetUserPassword: (id: string, password: string) =>
     request<void>(`/api/users/${id}/reset-password`, {
       method: 'POST',

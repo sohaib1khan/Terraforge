@@ -238,6 +238,86 @@ func (s *Service) SetDisabled(ctx context.Context, userID uuid.UUID, disabled bo
 	return s.GetUser(ctx, userID)
 }
 
+type UpdateUserInput struct {
+	Email   *string
+	IsAdmin *bool
+}
+
+func (s *Service) UpdateUser(ctx context.Context, userID uuid.UUID, in UpdateUserInput) (User, error) {
+	current, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return User{}, err
+	}
+
+	email := current.Email
+	if in.Email != nil {
+		email = normalizeEmail(*in.Email)
+		if email == "" || !strings.Contains(email, "@") {
+			return User{}, fmt.Errorf("%w: email must be valid", ErrValidation)
+		}
+	}
+
+	isAdmin := current.IsAdmin
+	if in.IsAdmin != nil {
+		isAdmin = *in.IsAdmin
+	}
+
+	// Never leave the instance without an active admin.
+	if current.IsAdmin && !isAdmin {
+		if err := s.ensureOtherActiveAdmin(ctx, userID); err != nil {
+			return User{}, err
+		}
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		UPDATE users SET email = $2, is_admin = $3 WHERE id = $1
+	`, userID, email, isAdmin)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return User{}, fmt.Errorf("%w: email already registered", ErrConflict)
+		}
+		return User{}, err
+	}
+	return s.GetUser(ctx, userID)
+}
+
+func (s *Service) DeleteUser(ctx context.Context, userID uuid.UUID) error {
+	current, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if current.IsAdmin && current.DisabledAt == nil {
+		if err := s.ensureOtherActiveAdmin(ctx, userID); err != nil {
+			return err
+		}
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// ensureOtherActiveAdmin fails when userID is the last enabled admin.
+func (s *Service) ensureOtherActiveAdmin(ctx context.Context, userID uuid.UUID) error {
+	var others int
+	err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM users
+		WHERE is_admin = true AND disabled_at IS NULL AND id <> $1
+	`, userID).Scan(&others)
+	if err != nil {
+		return err
+	}
+	if others == 0 {
+		return fmt.Errorf("%w: cannot remove the last active admin", ErrForbidden)
+	}
+	return nil
+}
+
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }

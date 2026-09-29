@@ -24,6 +24,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/auth/me", h.Middleware(http.HandlerFunc(h.Me)))
 	mux.Handle("GET /api/users", h.RequireAdmin(http.HandlerFunc(h.ListUsers)))
 	mux.Handle("POST /api/users", h.RequireAdmin(http.HandlerFunc(h.CreateUser)))
+	mux.Handle("PATCH /api/users/{id}", h.RequireAdmin(http.HandlerFunc(h.UpdateUser)))
+	mux.Handle("DELETE /api/users/{id}", h.RequireAdmin(http.HandlerFunc(h.DeleteUser)))
 	mux.Handle("POST /api/users/{id}/reset-password", h.RequireAdmin(http.HandlerFunc(h.ResetPassword)))
 	mux.Handle("POST /api/users/{id}/disable", h.RequireAdmin(http.HandlerFunc(h.DisableUser)))
 	mux.Handle("POST /api/users/{id}/enable", h.RequireAdmin(http.HandlerFunc(h.EnableUser)))
@@ -210,6 +212,78 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type updateUserRequest struct {
+	Email   *string `json:"email"`
+	IsAdmin *bool   `json:"is_admin"`
+}
+
+func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	var req updateUserRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Email == nil && req.IsAdmin == nil {
+		httpx.WriteError(w, http.StatusBadRequest, "email or is_admin required")
+		return
+	}
+	claims := UserFromContext(r.Context())
+	if claims != nil && claims.UserID == id && req.IsAdmin != nil && !*req.IsAdmin {
+		httpx.WriteError(w, http.StatusBadRequest, "cannot remove your own admin access")
+		return
+	}
+	user, err := h.svc.UpdateUser(r.Context(), id, UpdateUserInput{
+		Email:   req.Email,
+		IsAdmin: req.IsAdmin,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrValidation):
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ErrConflict):
+			httpx.WriteError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, ErrForbidden):
+			httpx.WriteError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrUserNotFound):
+			httpx.WriteError(w, http.StatusNotFound, "user not found")
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, "failed to update user")
+		}
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, user)
+}
+
+func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	claims := UserFromContext(r.Context())
+	if claims != nil && claims.UserID == id {
+		httpx.WriteError(w, http.StatusBadRequest, "cannot delete your own account")
+		return
+	}
+	if err := h.svc.DeleteUser(r.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			httpx.WriteError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrUserNotFound):
+			httpx.WriteError(w, http.StatusNotFound, "user not found")
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, "failed to delete user")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) DisableUser(w http.ResponseWriter, r *http.Request) {
 	h.setDisabled(w, r, true)
 }
@@ -228,6 +302,18 @@ func (h *Handler) setDisabled(w http.ResponseWriter, r *http.Request, disabled b
 	if claims != nil && claims.UserID == id && disabled {
 		httpx.WriteError(w, http.StatusBadRequest, "cannot disable your own account")
 		return
+	}
+	if disabled {
+		target, err := h.svc.GetUser(r.Context(), id)
+		if err == nil && target.IsAdmin {
+			if err := h.svc.ensureOtherActiveAdmin(r.Context(), id); err != nil {
+				httpx.WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
+		} else if err != nil && !errors.Is(err, ErrUserNotFound) {
+			httpx.WriteError(w, http.StatusInternalServerError, "failed to update user")
+			return
+		}
 	}
 	user, err := h.svc.SetDisabled(r.Context(), id, disabled)
 	if err != nil {
