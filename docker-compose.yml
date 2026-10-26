@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-terraforge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-terraforge}
@@ -17,6 +18,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
@@ -30,12 +32,14 @@ services:
       context: ./runner-image
     image: ${RUNNER_IMAGE:-terraforge-runner:local}
     entrypoint: ["true"]
+    # One-shot image bake for workers — must exit successfully, not restart.
     restart: "no"
 
   api:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-terraforge}:${POSTGRES_PASSWORD:-terraforge}@postgres:5432/${POSTGRES_DB:-terraforge}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
@@ -61,6 +65,7 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile.worker
+    restart: unless-stopped
     container_name: terraforge-worker
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-terraforge}:${POSTGRES_PASSWORD:-terraforge}@postgres:5432/${POSTGRES_DB:-terraforge}?sslmode=disable
@@ -88,6 +93,7 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       # Primary app URL: http://localhost:${APP_PORT}
       - "${APP_PORT:-3000}:80"
